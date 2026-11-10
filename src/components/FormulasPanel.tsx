@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEditor } from "../model/store";
 import { Z_COLORS, Z_TEXT } from "../model/calc";
+import { isDrivable } from "../model/roads";
 import { tr } from "../i18n";
 
 // величина с нижним индексом, например V своб
@@ -29,6 +30,16 @@ const fmt = (x: number) => String(x).replace(".", ",");
 
 export default function FormulasPanel() {
   const norms = useEditor((s) => s.norms);
+  const data = useEditor((s) => s.data);
+  const selection = useEditor((s) => s.selection);
+  const analysis = useEditor((s) => s.analysis);
+  const setAnalysis = useEditor((s) => s.setAnalysis);
+  // выделенные дороги: по ним формулы считаются на вкладке «Расчеты и графики»
+  const picked = (selection?.kind === "way" ? [selection.id] : selection?.kind === "ways" ? selection.ids : []).filter((id) => { const w = data?.ways.get(id); return !!w && isDrivable(w); });
+  const calc = () => {
+    setAnalysis([...new Set([...analysis, ...picked])]);
+    window.dispatchEvent(new CustomEvent("wf-open-calc"));
+  };
   const zones = [
     `Z < ${fmt(norms.z1)}`,
     `${fmt(norms.z1)} ≤ Z < ${fmt(norms.z2)}`,
@@ -38,6 +49,10 @@ export default function FormulasPanel() {
 
   return (
     <div className="formulas">
+      <div className="fcalc">
+        <span>{picked.length ? tr("Выделено дорог: {0}. Формулы посчитаются по их длине, полосам, скорости и замерам.", picked.length) : tr("Выделите дорогу на карте (участок: Shift+клик по второму узлу) и посчитайте формулы для нее. Интенсивность и время проезда вводятся в таблице расчета.")}</span>
+        <button className="primary" disabled={!picked.length} onClick={calc}>{tr("Посчитать для выделенного")}</button>
+      </div>
       <Card title={tr("Скорость свободного движения, км/ч")} formula={<><V n="V" s={tr("своб")} /> = <V n="V" s="max" /> · <V n="k" s={tr("покр")} /></>}>
         <V n="V" s="max" /> {" "}{tr("- разрешенная скорость (тег maxspeed, если его нет - по классу дороги);")}<br />
         <V n="k" s={tr("покр")} /> {" "}{tr("- коэффициент покрытия: асфальт 1, грунт 0,5 (вкладка «Нормативы»).")}</Card>

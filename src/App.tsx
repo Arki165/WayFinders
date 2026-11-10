@@ -183,6 +183,13 @@ export default function App() {
     }
   }
 
+  // «Посчитать» в свойствах дороги и на вкладке формул открывает таблицу расчета, даже если нижняя панель скрыта
+  useEffect(() => {
+    const open = () => setBottom("calc");
+    window.addEventListener("wf-open-calc", open);
+    return () => window.removeEventListener("wf-open-calc", open);
+  }, []);
+
   // горячие клавиши
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

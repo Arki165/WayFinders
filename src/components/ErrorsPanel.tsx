@@ -13,8 +13,10 @@ const TITLE: Record<GraphError["type"], string> = {
   get bridge() { return tr("Мост без уровня"); },
   get building() { return tr("Дорога сквозь здание"); },
   get long() { return tr("Длинный участок без перекрестков"); },
+  get value() { return tr("Значение не поймут симуляторы"); },
+  get short() { return tr("Отрезок нулевой длины"); },
 };
-const FIX: Partial<Record<GraphError["type"], string>> = { get torn() { return tr("Соединить"); }, get glued() { return tr("Добавить узел"); }, get isolated() { return tr("Удалить"); }, get attr() { return tr("Заполнить"); }, get bridge() { return tr("Поднять мост"); }, get building() { return tr("Мост над зданием"); } };
+const FIX: Partial<Record<GraphError["type"], string>> = { get value() { return tr("Убрать значение"); }, get short() { return tr("Слить узлы"); }, get torn() { return tr("Соединить"); }, get glued() { return tr("Добавить узел"); }, get isolated() { return tr("Удалить"); }, get attr() { return tr("Заполнить"); }, get bridge() { return tr("Поднять мост"); }, get building() { return tr("Мост над зданием"); } };
 // длина: до 1 км в метрах, дальше в километрах
 const km = (m: number) => (m < 1000 ? tr("{0} м", Math.round(m)) : tr("{0} км", (m / 1000).toLocaleString(locale(), { maximumFractionDigits: 1 })));
 const ORDER: Record<Severity, number> = { danger: 0, warn: 1, info: 2 };
@@ -22,6 +24,7 @@ const ORDER: Record<Severity, number> = { danger: 0, warn: 1, info: 2 };
 export default function ErrorsPanel() {
   const data = useEditor((s) => s.data);
   const check = useEditor((s) => s.check);
+  const stale = useEditor((s) => s.checkStale);
   const st = useEditor();
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [cur, setCur] = useState<string | null>(null);
@@ -37,6 +40,8 @@ export default function ErrorsPanel() {
       case "attr": return tr("«{0}»: не задано: {1}. Симуляторы подставят значения по умолчанию.", nm(e.ways[0]), e.miss!.map((k) => (k === "lanes" ? tr("число полос") : k === "maxspeed" ? tr("скорость") : k)).join(tr(" и ")));
       case "bridge": return tr("«{0}» отмечена мостом без уровня: может склеиться с дорогой под ней.", nm(e.ways[0]));
       case "long": return tr("«{0}»: {1} без перекрестков (для этого класса до {2}). Дорогу лучше соединить с соседними. Это предупреждение, оставить можно.", nm(e.ways[0]), km(e.len!), km(e.limit!));
+      case "value": return tr("«{0}»: {1}. MatSim и SUMO такое значение не разберут и молча подставят свое.", nm(e.ways[0]), e.bad!.join(", "));
+      case "short": return tr("«{0}»: два соседних узла почти в одной точке ({1} см). В SUMO и MatSim получится ребро нулевой длины.", nm(e.ways[0]), Math.round(e.len! * 100));
       case "building": return tr("«{0}» проходит сквозь здание: в Webots машины поедут через стену. Перенесите дорогу, сделайте мост или отметьте проезд под домом (арку).", nm(e.ways[0]));
     }
   };
@@ -70,6 +75,7 @@ export default function ErrorsPanel() {
           </button>
         ))}
       </div>
+      {stale && <p className="hint">{tr("Проверяю граф после правки...")}</p>}
       <p className="hint">{tr("Связность по направлениям:")}{" "}{pct.toFixed(1)}{tr("% узлов в главной сильной компоненте. Компонент связности:")}{" "}{check.components}.</p>
       <div className="chips">
         <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>{tr("Все")}</button>

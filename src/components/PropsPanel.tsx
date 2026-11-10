@@ -230,7 +230,7 @@ function WayPanel({ way }: { way: OsmWay }) {
       <p className="hint">{tr("Shift+клик по другим дорогам выделяет несколько сразу. Shift+клик по двум узлам выделяет участок между ними.")}</p>
 
       <div className="chips">
-        <button className={inAnalysis ? "on" : ""} onClick={() => setAnalysis(inAnalysis ? analysis.filter((x) => x !== way.id) : [...analysis, way.id])}>{inAnalysis ? tr("Убрать из расчета") : tr("Добавить в расчет")}</button>
+        <button className={inAnalysis ? "on" : ""} onClick={() => { setAnalysis(inAnalysis ? analysis.filter((x) => x !== way.id) : [...analysis, way.id]); if (!inAnalysis) window.dispatchEvent(new CustomEvent("wf-open-calc")); }}>{inAnalysis ? tr("Убрать из расчета") : tr("Добавить в расчет")}</button>
       </div>
     </div>
   );

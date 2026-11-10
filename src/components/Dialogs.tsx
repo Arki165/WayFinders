@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, mergeMap, okToReplace } from "../model/store";
 import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
@@ -333,6 +333,8 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
 // ---------- сохранение с проверкой ----------
 export function SaveDialog({ onClose }: { onClose: () => void }) {
   const data = useEditor((s) => s.data)!;
+  // перед записью нужна свежая проверка (на большом графе она отложена)
+  useEffect(() => { if (useEditor.getState().checkStale) useEditor.getState().recheck(true); }, []);
   const check = useEditor((s) => s.check)!;
   const fileName = useEditor((s) => s.fileName);
   const filePath = useEditor((s) => s.filePath);

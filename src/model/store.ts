@@ -40,6 +40,7 @@ interface EditorState {
   saved: Command | null; // последняя правка на момент сохранения: по ней видно, есть ли несохраненное
   log: { label: string; time: Date }[];
   check: ValidationResult | null;
+  checkStale: boolean; // большой граф: проверка отложена, check пока от прошлой правки
   ignored: Set<string>;
   norms: Norms;
   analysis: number[]; // дороги, добавленные в расчет
@@ -55,7 +56,7 @@ interface EditorState {
   undo: () => void;
   redo: () => void;
   markSaved: () => void;
-  recheck: () => void;
+  recheck: (now?: boolean) => void;
   toast: (text: string) => void;
   flyTo: (lat: number, lon: number, zoom?: number) => void;
   fitTo: (bounds: [number, number, number, number]) => void;
@@ -77,6 +78,8 @@ function restore(d: OsmData, ws: WaySnap, ns: NodeSnap) {
 }
 
 let nextId = -1;
+export const BIG_NODES = 60000, CHECK_DELAY = 500;
+let checkTimer: ReturnType<typeof setTimeout> | null = null;
 export const newId = () => nextId--;
 
 // Исходный вид измененных элементов: значение до первой правки, null - элемента не было
@@ -122,6 +125,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   saved: null,
   log: [],
   check: null,
+  checkStale: false,
   ignored: new Set(),
   norms: loadNorms(),
   analysis: [],
@@ -132,7 +136,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   load: (data, fileName, filePath) => {
     nextId = -1;
     set({ data, original: newLog(), fileName, filePath, selection: null, past: [], future: [], saved: null, log: [], ignored: new Set(), analysis: [], highlight: [], version: get().version + 1 });
-    get().recheck();
+    get().recheck(true);
   },
   select: (selection) => set({ selection }),
   setTool: (tool) => set({ tool }),
@@ -179,9 +183,22 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().recheck();
   },
   markSaved: () => set({ saved: get().past[get().past.length - 1] ?? null }),
-  recheck: () => {
+  // Проверка графа после правки. На большом городе (больше BIG_NODES узлов) она занимает около секунды,
+  // поэтому там правка применяется сразу, а проверка идет через CHECK_DELAY мс после последней правки.
+  // now - проверить немедленно (открытие файла, сохранение, массовое исправление)
+  recheck: (now) => {
     const d = get().data;
-    set({ check: d ? validate(d, get().ignored) : null, version: get().version + 1 });
+    if (checkTimer) { clearTimeout(checkTimer); checkTimer = null; }
+    if (!d || now || d.nodes.size <= BIG_NODES || !get().check) {
+      set({ check: d ? validate(d, get().ignored) : null, checkStale: false, version: get().version + 1 });
+      return;
+    }
+    set({ checkStale: true, version: get().version + 1 });
+    checkTimer = setTimeout(() => {
+      checkTimer = null;
+      const cur = get().data;
+      if (cur) set({ check: validate(cur, get().ignored), checkStale: false, version: get().version + 1 });
+    }, CHECK_DELAY);
   },
   toast: (text) => set({ message: { text, t: Date.now() } }),
   flyTo: (lat, lon, zoom) => set({ focus: { lat, lon, zoom, t: Date.now() } }),
@@ -755,6 +772,7 @@ export function fixAllTorn(): number {
   batch(tr("Соединены все разрывы"), () => {
     for (let pass = 0; pass < 5; pass++) {
       const d = ed().data;
+      if (ed().checkStale) ed().recheck(true); // нужен свежий список разрывов
       const errs = ed().check?.errors.filter((x) => x.type === "torn") ?? [];
       if (!d || !errs.length) break;
       // какие дороги и узлы изменятся: нужны для отмены
@@ -797,6 +815,12 @@ export function fixError(e: GraphError) {
   }
   if (e.type === "bridge") ed().run(tr("Мост поднят над дорогой"), e.ways, [], () => { d.ways.get(e.ways[0])!.tags.layer = "1"; });
   if (e.type === "building") bridgeOverBuilding(e.ways[0]);
+  if (e.type === "value") {
+    const w = d.ways.get(e.ways[0])!;
+    // непонятное значение убираем: симулятор возьмет значение по классу дороги, а в панели его можно задать заново
+    ed().run(tr("Убраны непонятные значения тегов"), [w.id], [], () => { for (const s of e.bad ?? []) delete w.tags[s.split(/[= ]/)[0]]; });
+  }
+  if (e.type === "short" && e.seg) joinNodes(e.seg[1], e.seg[0]);
 }
 
 // ---------- общие помощники ----------

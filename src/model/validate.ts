@@ -105,8 +105,28 @@ function cityClips(data: OsmData): Clip[] {
   return out;
 }
 
+// Отрезок дороги короче этого считаем вырожденным (узлы поставлены в одну точку), м
+export const SHORT_M = 0.2;
+const MAXSPEED_WORDS = /^(none|walk|signals|[A-Z]{2}:[a-z_0-9]+)$/;
+
+// Теги дороги, значение которых симуляторы не разберут и молча заменят своим. Возвращает строки вида lanes=много
+export function badValues(t: Record<string, string>): string[] {
+  const bad: string[] = [];
+  const int = (v: string) => /^[1-9]\d?$/.test(v);
+  for (const k of ["lanes", "lanes:forward", "lanes:backward"]) if (t[k] !== undefined && !int(t[k])) bad.push(`${k}=${t[k]}`);
+  for (const k of ["maxspeed", "maxspeed:forward", "maxspeed:backward"]) {
+    const v = t[k];
+    if (v !== undefined && !/^\d{1,3}(\.\d+)?( ?(mph|km\/h|knots))?$/.test(v) && !MAXSPEED_WORDS.test(v)) bad.push(`${k}=${v}`);
+  }
+  if (t.oneway !== undefined && !["yes", "no", "-1", "1", "true", "false", "reversible", "alternating"].includes(t.oneway)) bad.push(`oneway=${t.oneway}`);
+  if (t.layer !== undefined && !/^-?\d$/.test(t.layer)) bad.push(`layer=${t.layer}`);
+  // полосы по направлениям в сумме больше общего числа
+  if (int(t.lanes ?? "") && int(t["lanes:forward"] ?? "") && int(t["lanes:backward"] ?? "") && Number(t["lanes:forward"]) + Number(t["lanes:backward"]) > Number(t.lanes)) bad.push(`lanes=${t.lanes} < ${t["lanes:forward"]} + ${t["lanes:backward"]}`);
+  return bad;
+}
+
 export type Severity = "danger" | "warn" | "info";
-export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge" | "building" | "long";
+export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge" | "building" | "long" | "value" | "short";
 
 export interface GraphError {
   key: string;
@@ -126,6 +146,7 @@ export interface GraphError {
   miss?: string[];
   len?: number; // длина участка без перекрестков, м
   limit?: number; // сколько допускается для этого класса, м
+  bad?: string[]; // теги с непонятным значением, вида lanes=много
 }
 
 export interface ValidationResult {
@@ -365,6 +386,26 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
           errors.push({ key: `long:${w.id}:${w.nodeIds[from]}`, type: "long", sev: "warn", lat: mid.lat, lon: mid.lon, ways: [w.id], len, limit });
         }
         len = 0; from = i;
+      }
+    }
+  }
+
+  // 7. Проверка под симуляторы: значения, которые MatSim, SUMO и Webots не разберут, и вырожденные отрезки
+  for (const w of roads) {
+    const bad = badValues(w.tags);
+    if (bad.length) {
+      const mid = data.nodes.get(w.nodeIds[Math.floor(w.nodeIds.length / 2)])!;
+      errors.push({ key: "value:" + w.id, type: "value", sev: "warn", lat: mid.lat, lon: mid.lon, ways: [w.id], bad });
+    }
+    // соседние узлы дороги почти в одной точке: ребро нулевой длины, машины на нем встают
+    for (let i = 1; i < w.nodeIds.length; i++) {
+      const a = w.nodeIds[i - 1], c = w.nodeIds[i];
+      if (a === c) continue;
+      const p = xy(a), q = xy(c), len = Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (len < SHORT_M) {
+        const n = data.nodes.get(c)!;
+        errors.push({ key: `short:${w.id}:${c}`, type: "short", sev: "warn", lat: n.lat, lon: n.lon, ways: [w.id], node: c, seg: [a, c], len });
+        break; // одной карточки на дорогу достаточно
       }
     }
   }
