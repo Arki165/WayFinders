@@ -56,8 +56,8 @@ function WayPanel({ way }: { way: OsmWay }) {
         </select>
         <span>Движение</span>
         <div className="seg">
-          {([["no", "⇄ Двустороннее"], ["yes", "→ Туда"], ["-1", "← Обратно"]] as const).map(([v, l]) => (
-            <button key={v} className={ow === v ? "on" : ""} onClick={() => change({ oneway: v }, "Направление")}>{l}</button>
+          {([["no", "⇄ Обе", "Движение в обе стороны"], ["yes", "→ Туда", "Одностороннее по направлению линии"], ["-1", "← Обратно", "Одностороннее против направления линии"]] as const).map(([v, l, t]) => (
+            <button key={v} className={ow === v ? "on" : ""} title={t} onClick={() => change({ oneway: v }, "Направление")}>{l}</button>
           ))}
         </div>
         <span>Полосы</span>
