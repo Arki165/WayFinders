@@ -1,7 +1,9 @@
 import type { OsmData, Tags } from "./types";
 
 function esc(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    // перенос строки и табуляция в атрибуте: без ссылки XML при чтении превратит их в пробел
+    .replace(/\n/g, "&#10;").replace(/\r/g, "&#13;").replace(/\t/g, "&#9;");
 }
 
 function attrsToString(attrs: Record<string, string>): string {

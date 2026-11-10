@@ -11,7 +11,7 @@ import RoutesPanel from "./components/RoutesPanel";
 import AppMenu from "./components/AppMenu";
 import GuideDialog from "./components/GuideDialog";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
-import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, type Tool } from "./model/store";
+import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, isDirty, okToReplace, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
@@ -54,6 +54,10 @@ export default function App() {
   const setTool = useEditor((s) => s.setTool);
   const check = useEditor((s) => s.check);
   const past = useEditor((s) => s.past);
+  const savedCmd = useEditor((s) => s.saved);
+  const dirty = !!data && (past[past.length - 1] ?? null) !== savedCmd;
+  // главный процесс спрашивает это перед закрытием окна
+  useEffect(() => { window.wfDirty = isDirty; return () => { delete window.wfDirty; }; }, []);
   const future = useEditor((s) => s.future);
   const message = useEditor((s) => s.message);
   const version = useEditor((s) => s.version);
@@ -67,7 +71,7 @@ export default function App() {
   // размеры панелей в пикселях, меняются перетаскиванием края
   // размеры панелей не меньше рабочего минимума: если окно открылось свернутым (ширина 0),
   // раньше запоминалась панель шириной 0 и пропадала насовсем
-  const [sideWidth, setSideWidth] = useState(Math.max(280, Math.min(saved.sideWidth ?? 360, Math.round(window.innerWidth * 0.6))));
+  const [sideWidth, setSideWidth] = useState(Math.max(300, Math.min(saved.sideWidth ?? 360, Math.round(window.innerWidth * 0.6))));
   const [bottomHeight, setBottomHeight] = useState(Math.max(150, Math.min(saved.bottomHeight ?? 320, window.innerHeight - 250)));
   const [basemap, setBasemap] = useState<Basemap>(saved.basemap ?? "map");
   const [view3d, setView3d] = useState(false);
@@ -105,8 +109,11 @@ export default function App() {
   }, [message]);
 
   async function openFile() {
+    if (!okToReplace()) return;
     if (window.api) {
-      const f = await window.api.openOsm();
+      let f: Awaited<ReturnType<NonNullable<typeof window.api>["openOsm"]>>;
+      // файл может не прочитаться: нет доступа, слишком большой
+      try { f = await window.api.openOsm(); } catch (e) { return st.getState().toast(tr("Не удалось открыть файл: ") + (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, "") : e)); }
       if (!f) return;
       loadText(f.text, f.name, f.path);
     } else {
@@ -135,8 +142,9 @@ export default function App() {
   // Присоединить еще одну карту (.osm) к открытой: соседний район, другой город
   async function addMap() {
     let f: { text: string; name: string } | null = null;
-    if (window.api) f = await window.api.openOsm();
-    else f = await new Promise((ok) => {
+    if (window.api) {
+      try { f = await window.api.openOsm(); } catch (e) { return st.getState().toast(tr("Не удалось присоединить файл: ") + (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, "") : e)); }
+    } else f = await new Promise((ok) => {
       const inp = document.createElement("input");
       inp.type = "file";
       inp.accept = ".osm,.xml";
@@ -158,6 +166,7 @@ export default function App() {
     }, 30);
   }
   async function openExample() {
+    if (!okToReplace()) return;
     setLoading(true);
     try {
       let text: string;
@@ -221,7 +230,7 @@ export default function App() {
           <Logo size={28} />
           <span className="brand-text">
             <b>Wayfinder <small>v{VERSION}</small></b>
-            <span className="file">{fileName || tr("Файл не открыт")}{past.length > 0 && <i className="dirty" title={tr("Есть несохраненные правки")} />}</span>
+            <span className="file">{fileName || tr("Файл не открыт")}{dirty && <i className="dirty" title={tr("Есть несохраненные правки")} />}</span>
           </span>
         </div>
         <div className="tb-group">
@@ -309,7 +318,7 @@ export default function App() {
 
         {!data ? null : side ? (
           <aside className="side">
-            <Resizer dir="x" value={sideWidth} min={280} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
+            <Resizer dir="x" value={sideWidth} min={300} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
             <div className="tabs">
               <button className={side === "props" ? "on" : ""} onClick={() => setSide("props")}>{tr("Свойства")}</button>
               <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>{tr("Ошибки")}{" "}{check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>

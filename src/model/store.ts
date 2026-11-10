@@ -37,6 +37,7 @@ interface EditorState {
   version: number; // растет после каждой правки, по нему перерисовывается интерфейс
   past: Command[];
   future: Command[];
+  saved: Command | null; // последняя правка на момент сохранения: по ней видно, есть ли несохраненное
   log: { label: string; time: Date }[];
   check: ValidationResult | null;
   ignored: Set<string>;
@@ -53,6 +54,7 @@ interface EditorState {
   run: (label: string, ways: number[], nodes: number[], mutate: () => void) => void;
   undo: () => void;
   redo: () => void;
+  markSaved: () => void;
   recheck: () => void;
   toast: (text: string) => void;
   flyTo: (lat: number, lon: number, zoom?: number) => void;
@@ -117,6 +119,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   version: 0,
   past: [],
   future: [],
+  saved: null,
   log: [],
   check: null,
   ignored: new Set(),
@@ -128,7 +131,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   load: (data, fileName, filePath) => {
     nextId = -1;
-    set({ data, original: newLog(), fileName, filePath, selection: null, past: [], future: [], log: [], ignored: new Set(), analysis: [], highlight: [], version: get().version + 1 });
+    set({ data, original: newLog(), fileName, filePath, selection: null, past: [], future: [], saved: null, log: [], ignored: new Set(), analysis: [], highlight: [], version: get().version + 1 });
     get().recheck();
   },
   select: (selection) => set({ selection }),
@@ -175,6 +178,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     fixSelection(get, set);
     get().recheck();
   },
+  markSaved: () => set({ saved: get().past[get().past.length - 1] ?? null }),
   recheck: () => {
     const d = get().data;
     set({ check: d ? validate(d, get().ignored) : null, version: get().version + 1 });
@@ -189,6 +193,16 @@ export const useEditor = create<EditorState>((set, get) => ({
   setHighlight: (highlight) => set({ highlight }),
   bump: () => set({ version: get().version + 1 }),
 }));
+
+// Есть ли правки, которых нет в файле на диске
+export function isDirty(): boolean {
+  const { data, past, saved } = useEditor.getState();
+  return !!data && (past[past.length - 1] ?? null) !== saved;
+}
+// Можно ли заменить открытый граф другим: при несохраненных правках спрашиваем
+export function okToReplace(): boolean {
+  return !isDirty() || confirm(tr("Есть несохраненные правки. Открыть другой граф без сохранения?"));
+}
 
 function fixSelection(get: () => EditorState, set: (p: Partial<EditorState>) => void) {
   const { selection: s, data } = get();
@@ -994,6 +1008,8 @@ export function makeRoundabout(nodeId: number, R = 18) {
   const ws = drivableWith(d, nodeId);
   if (!x0 || !ws.length) return ed().toast(tr("Кольцо ставится в узел дороги"));
   if (ws.some((w) => w.tags.junction === "roundabout")) return ed().toast(tr("Здесь уже круговое движение"));
+  // дорога-петля проходит через узел дважды: рукава такой дороги не разобрать, а узел остался бы в ней после удаления
+  if (ws.some((w) => w.nodeIds.indexOf(nodeId) !== w.nodeIds.lastIndexOf(nodeId))) return ed().toast(tr("Кольцо не ставится в узел, через который дорога проходит дважды (петля). Сначала разрежьте петлю"));
   const { P, add } = local(d, x0.lat, x0.lon);
   const usedElsewhere = [...d.ways.values()].some((w) => !ws.includes(w) && w.nodeIds.includes(nodeId));
   const main = ws.reduce((a, b) => (roadClass(b).rank > roadClass(a).rank ? b : a));

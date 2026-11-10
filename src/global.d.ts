@@ -11,4 +11,5 @@ interface WayFindersApi {
 
 interface Window {
   api?: WayFindersApi;
+  wfDirty?: () => boolean; // есть ли несохраненные правки (спрашивает главный процесс при закрытии окна)
 }

@@ -276,6 +276,10 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
   .side .tabs button { padding: 0 6px; }
   .side .tabs button.hide { padding: 0 4px; }
 }
+/* самая узкая панель: шрифт вкладок мельче, иначе названия наезжают друг на друга */
+@container (max-width: 325px) {
+  .side .tabs button:not(.hide) { padding: 0 4px; font-size: 12px; }
+}
 .pane { overflow-y: auto; overflow-x: hidden; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start; flex: 1; }
 /* переключатели в панели сжимаются под ее ширину, а не растягивают ее */
 .pane .seg { display: flex; max-width: 100%; }

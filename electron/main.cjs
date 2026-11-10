@@ -45,6 +45,33 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
 
+  // Закрытие окна с несохраненными правками: спрашиваем, чтобы работа не пропала от случайного крестика
+  let closing = false;
+  win.on("close", (e) => {
+    if (closing) return;
+    e.preventDefault();
+    win.webContents.executeJavaScript("[!!(window.wfDirty && window.wfDirty()), document.documentElement.lang]")
+      .catch(() => [false, "ru"]) // окно зависло или упало: закрываем без вопроса
+      .then(([dirty, lang]) => {
+        if (dirty) {
+          const en = lang === "en";
+          const choice = dialog.showMessageBoxSync(win, {
+            type: "warning",
+            title: "Wayfinder",
+            message: en ? "There are unsaved edits" : "Есть несохраненные правки",
+            detail: en ? "If you close the window, the edits will be lost." : "Если закрыть окно, правки пропадут.",
+            buttons: en ? ["Close without saving", "Cancel"] : ["Закрыть без сохранения", "Отмена"],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          });
+          if (choice !== 0) return;
+        }
+        closing = true;
+        win.close();
+      });
+  });
+
   // WF_DEBUG=1: выводить ошибки окна в терминал (для поиска проблем)
   if (process.env.WF_DEBUG) {
     win.webContents.on("console-message", (e) => console.log("[окно]", e.level, e.message));

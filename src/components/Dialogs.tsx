@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useEditor, mergeMap } from "../model/store";
+import { useEditor, mergeMap, okToReplace } from "../model/store";
 import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
 import type { OsmData } from "../osm/types";
@@ -243,6 +243,8 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
       const [s, w, n, e] = b;
       if ((n - s) * (e - w) > 0.02) return setErr(tr("Область слишком большая, приблизьте карту или загрузите город по названию"));
     } else if (!cityName && !chosen) return setErr(tr("Введите название города"));
+    // загрузка заменит открытый граф (если не присоединяем): при несохраненных правках спрашиваем заранее, до скачивания
+    if (!(merge && hasMap) && !okToReplace()) return;
     const ctl = new AbortController();
     abort.current = ctl;
     setBusy(true);
@@ -342,11 +344,16 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
   const newCount = [...data.ways.keys()].filter((id) => id < 0).length + [...data.nodes.keys()].filter((id) => id < 0).length;
 
   async function save(overwrite: boolean) {
-    const text = writeOsm(data);
-    let p: string | null | undefined;
-    if (overwrite && filePath && window.api) p = await window.api.writeFile(filePath, text);
-    else p = await saveOsmText(/\.osm$/i.test(name) ? name : name + ".osm", text);
-    if (p) { useEditor.getState().toast(tr("Сохранено: ") + p); onClose(); }
+    // файл может быть занят другой программой, диск защищен от записи: говорим об этом, а не молчим
+    try {
+      const text = writeOsm(data);
+      let p: string | null | undefined;
+      if (overwrite && filePath && window.api) p = await window.api.writeFile(filePath, text);
+      else p = await saveOsmText(/\.osm$/i.test(name) ? name : name + ".osm", text);
+      if (p) { useEditor.getState().markSaved(); useEditor.getState().toast(tr("Сохранено: ") + p); onClose(); }
+    } catch (e) {
+      useEditor.getState().toast(tr("Не удалось сохранить файл: ") + (e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*': (Error: )?/, "") : e));
+    }
   }
 
   return (
