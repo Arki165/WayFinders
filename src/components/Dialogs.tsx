@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useEditor } from "../model/store";
+import { useEditor, mergeMap } from "../model/store";
 import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
 import { saveOsmText } from "../model/exporting";
@@ -58,6 +58,9 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [withBuildings, setWithBuildings] = useState(true);
+  // если карта уже открыта, новый район по умолчанию присоединяется к ней
+  const hasMap = useEditor((s) => !!s.data);
+  const [merge, setMerge] = useState(hasMap);
 
   const body = (area: string) =>
     `[out:xml][timeout:120];${area}(way["highway"](A);way["railway"~"tram|rail"](A);${withBuildings ? 'way["building"](A);' : ""}node["highway"~"traffic_signals|crossing|bus_stop"](A);relation["type"="restriction"](A););(._;>;);out meta;`;
@@ -89,8 +92,14 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
       const text = await overpass(q);
       const data = parseOsm(text);
       if (!data.ways.size) throw new Error("В этой области нет дорог");
-      load(data, name, null);
-      useEditor.getState().toast(`Загружено: ${data.ways.size} линий, ${data.nodes.size} узлов за ${((performance.now() - t0) / 1000).toFixed(1)} с`);
+      const sec = ((performance.now() - t0) / 1000).toFixed(1);
+      if (merge && hasMap) {
+        const r = mergeMap(data, name);
+        if (r) useEditor.getState().toast(`Район присоединен: ${r.ways} новых линий за ${sec} с. На стыке сшито дорог: ${r.stitched}`);
+      } else {
+        load(data, name, null);
+        useEditor.getState().toast(`Загружено: ${data.ways.size} линий, ${data.nodes.size} узлов за ${sec} с`);
+      }
       onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -109,6 +118,7 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
           <input placeholder="Название города, например Ангарск" value={city} onChange={(e) => setCity(e.target.value)} disabled={busy} />
           <button disabled={busy} onClick={() => run("city")}>Скачать город</button>
         </div>
+        {hasMap && <label className="opt"><input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} disabled={busy} /> Присоединить к открытой карте (иначе открытая карта заменится)</label>}
         <label className="opt"><input type="checkbox" checked={withBuildings} onChange={(e) => setWithBuildings(e.target.checked)} /> Вместе со зданиями (нужны для 3D и Webots)</label>
         {busy && <p className="hint">Загрузка... крупный город может скачиваться минуту и больше.</p>}
         {err && <p className="error">{err}</p>}

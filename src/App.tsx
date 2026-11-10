@@ -8,7 +8,7 @@ import ComparePanel from "./components/ComparePanel";
 import FormulasPanel from "./components/FormulasPanel";
 import Resizer from "./components/Resizer";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
-import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, type Tool } from "./model/store";
+import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
@@ -94,6 +94,31 @@ export default function App() {
       }
     }, 30);
   }
+  // Присоединить еще одну карту (.osm) к открытой: соседний район, другой город
+  async function addMap() {
+    let f: { text: string; name: string } | null = null;
+    if (window.api) f = await window.api.openOsm();
+    else f = await new Promise((ok) => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = ".osm,.xml";
+      inp.onchange = async () => { const x = inp.files?.[0]; ok(x ? { text: await x.text(), name: x.name } : null); };
+      inp.click();
+    });
+    if (!f) return;
+    const { text, name } = f;
+    setLoading(true);
+    setTimeout(() => {
+      try {
+        const r = mergeMap(parseOsm(text), name);
+        if (r) st.getState().toast(`Карта ${name} присоединена: ${r.ways} линий, ${r.nodes} узлов. На стыке сшито дорог: ${r.stitched}`);
+      } catch (e) {
+        st.getState().toast("Не удалось присоединить файл: " + (e instanceof Error ? e.message : e));
+      } finally {
+        setLoading(false);
+      }
+    }, 30);
+  }
   async function openExample() {
     setLoading(true);
     try {
@@ -158,6 +183,7 @@ export default function App() {
       <header className="toolbar">
         <span className="logo" title="Версия программы">WayFinders <small className="ver">v{VERSION}</small></span>
         <button onClick={openFile} title="Открыть .osm (Ctrl+O)">Открыть</button>
+        <button onClick={addMap} disabled={!data || loading} title="Присоединить еще один .osm к открытой карте: соседний район или другой город. Дороги на стыке сшиваются">+ Добавить карту</button>
         <button onClick={() => setDialog("import")}>Загрузить из OSM</button>
         <button onClick={() => setDialog("save")} disabled={!data} title="Сохранить (Ctrl+S)">Сохранить .osm</button>
         <span className="sep" />

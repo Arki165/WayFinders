@@ -816,3 +816,97 @@ export function insertTemplate(t: CustomTemplate, lat: number, lon: number) {
   });
   ed().select(made.length === 1 ? { kind: "way", id: made[0] } : made.length ? { kind: "ways", ids: made } : null);
 }
+
+// ---------- соединение карт ----------
+// Добавить к открытой карте еще одну (файл или район из OpenStreetMap).
+// Одни и те же элементы OSM (тот же id и то же место) не дублируются.
+// Если id совпал, а это другой элемент (например, новые дороги из разных сохраненных файлов), он получает новый id.
+// Дороги на стыке сшиваются в общий узел: концы ближе 1,5 м, узлы в середине дороги ближе 0,5 м.
+export function mergeMap(extra: OsmData, name: string) {
+  const st = ed(), d = st.data, orig = st.original;
+  if (!d || !orig) return null;
+  const nodeMap = new Map<number, number>(), wayMap = new Map<number, number>();
+  const addedNodes: number[] = [], addedWays: number[] = [];
+
+  for (const n of extra.nodes.values()) {
+    const old = d.nodes.get(n.id);
+    if (old && distM(old.lat, old.lon, n.lat, n.lon) < 1) { nodeMap.set(n.id, n.id); continue; }
+    // узел удален в редакторе - не возвращаем его
+    if (!old && orig.nodes.has(n.id)) continue;
+    const id = old || n.id < 0 ? newId() : n.id;
+    nodeMap.set(n.id, id);
+    d.nodes.set(id, { ...n, id, tags: { ...n.tags }, attrs: { ...n.attrs } });
+    addedNodes.push(id);
+  }
+  for (const w of extra.ways.values()) {
+    const ids = w.nodeIds.map((x) => nodeMap.get(x)).filter((x): x is number => x !== undefined);
+    if (ids.length < 2) continue;
+    const old = d.ways.get(w.id);
+    if (!old && orig.ways.has(w.id)) continue; // удалена в редакторе
+    if (old && old.nodeIds.some((x) => ids.includes(x))) { wayMap.set(w.id, w.id); continue; } // та же дорога
+    const id = old || w.id < 0 ? newId() : w.id;
+    wayMap.set(w.id, id);
+    d.ways.set(id, { ...w, id, nodeIds: ids, tags: { ...w.tags }, attrs: { ...w.attrs } });
+    addedWays.push(id);
+  }
+  for (const r of extra.relations.values()) {
+    if (d.relations.has(r.id) || orig.relations.has(r.id)) continue;
+    const members = r.members.map((m) => ({ ...m, ref: m.type === "node" ? nodeMap.get(m.ref) ?? m.ref : m.type === "way" ? wayMap.get(m.ref) ?? m.ref : m.ref }));
+    d.relations.set(r.id, { ...r, members, tags: { ...r.tags }, attrs: { ...r.attrs } });
+  }
+
+  // сшивка стыка: концы новых дорог, совпадающие с узлами старых дорог
+  const cell = (lat: number, lon: number) => Math.round(lat * 50000) + ":" + Math.round(lon * 30000);
+  const oldRoadNodes = new Map<string, number[]>();
+  const added = new Set(addedNodes), addedW = new Set(addedWays);
+  for (const w of d.ways.values()) {
+    if (!isDrivable(w) || addedW.has(w.id)) continue;
+    for (const id of w.nodeIds) {
+      if (added.has(id)) continue;
+      const n = d.nodes.get(id)!;
+      const k = cell(n.lat, n.lon);
+      if (!oldRoadNodes.has(k)) oldRoadNodes.set(k, []);
+      oldRoadNodes.get(k)!.push(id);
+    }
+  }
+  // концы дорог сшиваем ближе 1,5 м, узлы в середине дороги - только если совпадают (ближе 0,5 м)
+  let stitched = 0;
+  const done = new Set<number>();
+  for (const wid of addedWays) {
+    const w = d.ways.get(wid);
+    if (!w || !isDrivable(w)) continue;
+    for (const id of [...w.nodeIds]) {
+      const n = d.nodes.get(id);
+      if (!n || !added.has(id) || done.has(id)) continue;
+      done.add(id);
+      const end = id === w.nodeIds[0] || id === w.nodeIds[w.nodeIds.length - 1];
+      const [ci, cj] = cell(n.lat, n.lon).split(":").map(Number);
+      let best: number | null = null, bd = end ? 1.5 : 0.5;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        for (const o of oldRoadNodes.get(ci + a + ":" + (cj + b)) ?? []) {
+          const m = d.nodes.get(o);
+          if (!m) continue;
+          const dist = distM(n.lat, n.lon, m.lat, m.lon);
+          if (dist < bd) { bd = dist; best = o; }
+        }
+      }
+      if (best !== null) { mergeInto(d, best, id); stitched++; }
+    }
+  }
+
+  // общая рамка карты
+  const b = d.bounds, e = extra.bounds;
+  if (e) d.bounds = b ? { minlat: Math.min(b.minlat, e.minlat), minlon: Math.min(b.minlon, e.minlon), maxlat: Math.max(b.maxlat, e.maxlat), maxlon: Math.max(b.maxlon, e.maxlon) } : { ...e };
+
+  // присоединенная карта - часть исходника: «Сравнение» и «Правки» не считают ее правкой
+  const o = cloneData(orig);
+  for (const id of addedNodes) { const n = d.nodes.get(id); if (n) o.nodes.set(id, { ...n, tags: { ...n.tags }, attrs: { ...n.attrs } }); }
+  for (const id of addedWays) { const w = d.ways.get(id); if (w) o.ways.set(id, { ...w, nodeIds: [...w.nodeIds], tags: { ...w.tags }, attrs: { ...w.attrs } }); }
+  for (const [id, r] of d.relations) if (!o.relations.has(id)) o.relations.set(id, { ...r, members: r.members.map((m) => ({ ...m })), tags: { ...r.tags }, attrs: { ...r.attrs } });
+  o.bounds = d.bounds ? { ...d.bounds } : null;
+
+  const res = { nodes: addedNodes.length, ways: addedWays.length, stitched };
+  useEditor.setState({ original: o, log: [{ label: `Присоединена карта ${name}: линий ${res.ways}, сшито на стыке ${stitched}`, time: new Date() }, ...st.log] });
+  ed().recheck();
+  return res;
+}
