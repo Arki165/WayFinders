@@ -86,6 +86,8 @@ h3 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; text-transform: upper
 .seg button + button { margin-left: -1px; }
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
+/* выбранная кнопка поверх соседних: иначе соседняя закрывает край ее рамки */
+.seg button.on { position: relative; z-index: 1; }
 
 .work { display: grid; grid-template-columns: 54px minmax(0, 1fr) 360px; min-height: 0; }
 .tools { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border-right: 1px solid var(--line); }

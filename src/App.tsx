@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import MapView, { getMapBounds, setMapDark, type Basemap } from "./components/MapView";
+import MapView, { getMapBounds, type Basemap } from "./components/MapView";
 import PropsPanel from "./components/PropsPanel";
 import ErrorsPanel from "./components/ErrorsPanel";
 import HistoryPanel from "./components/HistoryPanel";
@@ -56,7 +56,6 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    setMapDark(theme === "dark");
     localStorage.setItem("theme", theme);
   }, [theme]);
 
@@ -190,7 +189,7 @@ export default function App() {
         </nav>
 
         <main className="center">
-          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} />
+          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} dark={theme === "dark"} />
           {tool === "draw" && (
             <div className="optbar">Шаблон новой дороги:
               <select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
