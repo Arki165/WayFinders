@@ -270,3 +270,19 @@ export function dashes(path: P3[], dash = 3, gap = 6): P3[][] {
   }
   return out;
 }
+
+// Укоротить линию: отрезать a метров в начале и b метров в конце.
+// Нужно на перекрестке: полосы примыкающей дороги кончаются у края другой дороги, а не заходят на нее.
+export function trimPath(path: P3[], a: number, b: number): P3[] {
+  if (a <= 0 && b <= 0) return path;
+  const L = pathLength(path);
+  if (a + b >= L - 1) return []; // короткий кусок целиком внутри перекрестка
+  const out: P3[] = [pointAt(path, a).pos];
+  let d = 0;
+  for (let i = 1; i < path.length; i++) {
+    d += segLen(path[i - 1], path[i]);
+    if (d > a && d < L - b) out.push(path[i]);
+  }
+  out.push(pointAt(path, L - b).pos);
+  return out;
+}

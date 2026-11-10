@@ -9,7 +9,7 @@ import { useEditor, addWay, lineHitsBuilding, THROUGH_BUILDING, deleteNode, dele
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
-import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, useLane } from "../model/lanes";
+import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
 import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
 import { cityPois, isMetroWay, metroLineCount, metroLines, zebras, type Poi, type PoiKind } from "../model/poi";
@@ -194,6 +194,8 @@ function shiftPath(path: [number, number][], off: number): [number, number][] {
 }
 
 type P3 = [number, number, number];
+// Цвет асфальта с оттенком класса дороги: на нем видна белая разметка
+const asphalt = (c: number[]): [number, number, number, number] => [c[0] * 0.35 + 105 * 0.65, c[1] * 0.35 + 108 * 0.65, c[2] * 0.35 + 104 * 0.65, c[3]];
 type RoadItem = { id: number; path: P3[]; color: [number, number, number, number]; width: number };
 type Pt = { id: number; pos: [number, number] };
 type LaneItem = { wayId: number; index: number; path: P3[]; kind: string; width: number };
@@ -577,18 +579,82 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // ---------- полосы и разметка в видимой части карты ----------
   const lanesOn = zoom >= LANES_ZOOM;
   const laneBox = lanesOn ? bbox : null;
+  // Какие дороги проходят через каждый узел: нужно, чтобы обрезать полосы на перекрестке
+  const nodeWays = useMemo(() => {
+    const m = new Map<number, OsmWay[]>();
+    if (!data || !lanesOn) return m;
+    for (const w of data.ways.values()) {
+      if (!isDrivable(w)) continue;
+      for (const id of new Set(w.nodeIds)) { const a = m.get(id); if (a) a.push(w); else m.set(id, [w]); }
+    }
+    return m;
+  }, [data, version, lanesOn]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const laneData = useMemo(() => {
     if (!data || !layersData || !laneBox) return null;
+    // Сколько метров полос убрать у конца дороги в узле id. Если дорога примыкает к другой
+    // (кольцо, Т-перекресток) или в узле сходятся три и больше дорог, полосы кончаются у края
+    // самой широкой соседней дороги. Продолжение улицы (две дороги встык) не трогаем.
+    const cutAt = (w: OsmWay, id: number) => {
+      const others = (nodeWays.get(id) ?? []).filter((o) => o.id !== w.id);
+      const through = others.some((o) => { const i = o.nodeIds.indexOf(id); return i > 0 && i < o.nodeIds.length - 1; });
+      if (!through && others.length < 2) return 0;
+      return Math.max(0, ...others.map((o) => roadWidth(o) / 2));
+    };
     const dw = (laneBox[2] - laneBox[0]) * 0.2, dh = (laneBox[3] - laneBox[1]) * 0.2;
     const inView = (p: P3) => p[0] > laneBox[0] - dw && p[0] < laneBox[2] + dw && p[1] > laneBox[1] - dh && p[1] < laneBox[3] + dh;
     const color = new Map(layersData.roads.map((r) => [r.id, r.color]));
+    // Где на дорогу w выходят другие дороги: отрезки вдоль пути (в метрах) слева и справа
+    const mouthGaps = (w: OsmWay, path: P3[]) => {
+      const left: [number, number][] = [], right: [number, number][] = [];
+      const k = Math.cos((path[0][1] * Math.PI) / 180);
+      // расстояние от начала пути до каждой его точки
+      const dist = [0];
+      for (let i = 1; i < path.length; i++) dist.push(dist[i - 1] + pathLength([path[i - 1], path[i]]));
+      for (let i = 1; i < w.nodeIds.length - 1; i++) {
+        const id = w.nodeIds[i], n = data.nodes.get(id);
+        const others = (nodeWays.get(id) ?? []).filter((o) => o.id !== w.id);
+        if (!n || !others.length) continue;
+        // ближайшая точка пути к узлу и направление дороги в ней
+        let j = 0, best = Infinity;
+        path.forEach((p, q) => { const dd = Math.hypot((p[0] - n.lon) * k, p[1] - n.lat); if (dd < best) { best = dd; j = q; } });
+        const a = path[Math.max(0, j - 1)], b = path[Math.min(path.length - 1, j + 1)];
+        const dx = (b[0] - a[0]) * k, dy = b[1] - a[1];
+        for (const o of others) {
+          const oi = o.nodeIds.indexOf(id);
+          // соседние узлы примыкающей дороги: в какую сторону она уходит
+          for (const nb of [o.nodeIds[oi - 1], o.nodeIds[oi + 1]]) {
+            const m = nb !== undefined ? data.nodes.get(nb) : undefined;
+            if (!m) continue;
+            const cross = dx * (m.lat - n.lat) - dy * (m.lon - n.lon) * k;
+            const half = roadWidth(o) / 2 + 1;
+            (cross > 0 ? left : right).push([dist[j] - half, dist[j] + half]);
+          }
+        }
+      }
+      return { left, right };
+    };
+    // Вырезать из линии отрезки gaps (метры от начала)
+    const cutOut = (line: P3[], gaps: [number, number][]): P3[][] => {
+      if (!gaps.length) return [line];
+      const L = pathLength(line), out: P3[][] = [];
+      let from = 0;
+      for (const [g0, g1] of [...gaps].sort((x, y) => x[0] - y[0])) {
+        if (g0 > from + 0.5) out.push(trimPath(line, from, L - Math.min(g0, L)));
+        from = Math.max(from, g1);
+      }
+      if (from < L - 0.5) out.push(trimPath(line, from, 0));
+      return out.filter((x) => x.length > 1);
+    };
     const items: LaneItem[] = [], lines: { path: P3[] }[] = [], labels: { pos: P3; angle: number; text: string }[] = [];
     const solid = (path: P3[]) => { lines.push({ path }); };
     const dashed = (path: P3[]) => { for (const d of dashes(path)) lines.push({ path: d }); };
     for (const w of data.ways.values()) {
       if (!isDrivable(w) || w.nodeIds.length < 2 || !color.has(w.id)) continue;
-      const path = roadPath(data, w, layersData.br);
-      if (!path.some(inView)) continue;
+      const full = roadPath(data, w, layersData.br);
+      if (!full.some(inView)) continue;
+      const path = trimPath(full, cutAt(w, w.nodeIds[0]), cutAt(w, w.nodeIds[w.nodeIds.length - 1]));
+      if (path.length < 2) continue;
       const lanes = getLanes(w), n = lanes.length;
       const widths = lanes.map(laneWidth);
       // границы полос поперек дороги, от левого края (отрицательные) к правому
@@ -603,9 +669,10 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (l.turn) { const p = pointAt(tp, L > 30 ? L - 12 : L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: l.turn }); }
         if (l.kind === "bus" && L > 30) { const p = pointAt(tp, L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: "bus" }); }
       });
-      // края проезжей части - сплошные
-      solid(offsetPath(path, edges[0] + 0.2));
-      solid(offsetPath(path, edges[n] - 0.2));
+      // края проезжей части - сплошные, но с разрывом там, где примыкает другая дорога (въезд не перечеркнут)
+      const gaps = mouthGaps(w, path);
+      for (const part of cutOut(offsetPath(path, edges[0] + 0.2), gaps.left)) solid(part);
+      for (const part of cutOut(offsetPath(path, edges[n] - 0.2), gaps.right)) solid(part);
       for (let i = 1; i < n; i++) {
         const b = edges[i], m = markBetween(lanes[i - 1], lanes[i], n);
         if (m === "dashed") dashed(offsetPath(path, b));
@@ -616,7 +683,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       }
     }
     return { items, lines, labels, color };
-  }, [data, layersData, version, laneBox]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, layersData, version, laneBox, nodeWays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- правки относительно исходного файла ----------
   const changes = useMemo(() => {
@@ -688,6 +755,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const flat = { depthCompare: "always" as const, depthWriteEnabled: false };
     // вблизи (линейка 50 м и мельче) полосы как асфальт с яркой разметкой, дальше - цвет класса и бледная разметка
     const laneClose = zoom >= 15.6;
+    // вблизи под полосами дорога того же цвета асфальта: на перекрестке и кольце нет светлых пятен
+    const asphaltRoads = !!lanesData && laneClose && !heat;
     const buildingsLayer = new PolygonLayer({ id: "buildings", data: city ? layersData.buildings : [], getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 200] : dark ? [56, 58, 66, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140]), getLineColor: dark ? [84, 87, 98, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d, pickable: true, updateTriggers: { getFillColor: [selWay?.id, dark, view3d] } });
     const groundLayers = [
         // метро на уровне «Город»: тонкие линии под дорогами (оно под землей)
@@ -698,9 +767,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new PathLayer<RoadItem>({ id: "roads-casing", data: city ? roadsData : [], getPath: (d) => d.path, getColor: dark ? [14, 15, 18, 230] : [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({
           id: "roads", data: roadsData, getPath: (d) => d.path,
-          getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : metroLvl ? ghost : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
+          getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : metroLvl ? ghost : soften(asphaltRoads ? asphalt(hlSet.has(d.id) ? HL : d.color) : hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
           capRounded: true, jointRounded: true, pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 120],
-          updateTriggers: { getColor: [selWay?.id, version, dark, selection, metroLvl, highlight] },
+          updateTriggers: { getColor: [selWay?.id, version, dark, selection, metroLvl, highlight, asphaltRoads] },
         }),
         // полосы поверх дороги: по ним можно кликнуть, выбранная подсвечена
         new PathLayer<LaneItem>({
@@ -714,7 +783,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
             const c = hlSet.has(d.wayId) ? HL : laneData?.color.get(d.wayId) ?? [200, 200, 200, 255];
             // в режиме загрузки Z и на отдалении цвет класса дороги важнее асфальта
             if (heat || !laneClose) return soften(c, dark);
-            return soften([c[0] * 0.35 + 105 * 0.65, c[1] * 0.35 + 108 * 0.65, c[2] * 0.35 + 104 * 0.65, c[3]], dark);
+            return soften(asphalt(c), dark);
           },
           pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 90],
           updateTriggers: { getColor: [selWay?.id, laneSel?.wayId, laneSel?.index, version, dark, heat, selection, laneClose, highlight] },
