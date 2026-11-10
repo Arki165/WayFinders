@@ -509,3 +509,25 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 /* кнопка «Вернуться к графу» при сильном отдалении карты */
 .back-to { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 3; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-weight: 600; box-shadow: var(--shadow); cursor: pointer; }
 .back-to:hover { background: var(--panel-3); }
+
+/* ---------- выбор шаблона дороги карточками ---------- */
+.tp { position: relative; }
+.tp-cur { gap: 8px; padding: 0 8px 0 4px; min-height: 34px; }
+.tp-cur span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.tp-cur svg:first-child, .tp-card svg { border-radius: 3px; background: color-mix(in srgb, var(--fg) 9%, transparent); flex: none; }
+.tp-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 452px; max-width: calc(100vw - 120px); max-height: min(520px, calc(100vh - 200px)); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.tp-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 2px 2px 5px; }
+.tp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 6px; }
+.tp-card { flex-direction: column; align-items: flex-start; gap: 4px; height: auto; min-height: 0; padding: 7px 8px; text-align: left; white-space: normal; }
+.tp-card b { font-weight: 600; font-size: 12.5px; line-height: 1.25; }
+.tp-card small { color: var(--muted); font-size: 11px; line-height: 1.25; }
+.tp-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.tp-lane { fill: #6b6f6a; }
+.tp-arrow { fill: #fff; stroke: #fff; stroke-width: 1.4; opacity: .85; }
+.tp-mid { stroke: #f0b445; stroke-width: 1.6; }
+.tp-dash { stroke: #fff; stroke-width: 1.2; stroke-dasharray: 5 4; }
+.tp-edge { stroke: #fff; stroke-width: 1.4; }
+.tp-rail { stroke: #82649f; stroke-width: 2; }
+.tp-tie { stroke: #82649f; stroke-width: 1.4; opacity: .6; }
+.tp-path { fill: #968273; }
+.tp-bld { fill: color-mix(in srgb, var(--fg) 35%, transparent); }

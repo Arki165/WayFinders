@@ -888,4 +888,11 @@ export const EN: Record<string, string> = {
   "Прямая": "Straight",
   "Дуга": "Arc",
   "Как соединять точки: прямыми отрезками или дугой, которая плавно продолжает предыдущий отрезок": "How points are joined: straight segments or an arc that smoothly continues the previous segment",
+  "{0} км/ч": "{0} km/h",
+  "{0} пол. · ПЧ {1} м": "{0} lanes · carriageway {1} m",
+  "контур по углам": "outline by corners",
+  "рельсовые пути": "rail tracks",
+  "для пешеходов": "for pedestrians",
+  "Пути, тротуары, здания": "Tracks, sidewalks, buildings",
+  "Шаблон новой дороги: тип, полосы и скорость": "New road template: type, lanes and speed",
 };

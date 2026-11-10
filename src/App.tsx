@@ -13,7 +13,7 @@ import GuideDialog from "./components/GuideDialog";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
 import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, isDirty, okToReplace, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
-import { TEMPLATES } from "./model/templates";
+import TemplatePicker from "./components/TemplatePicker";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
 import { VERSION } from "./version";
 import StreetSearch from "./components/StreetSearch";
@@ -282,7 +282,7 @@ export default function App() {
         <main className="center">
           <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} drawArc={arc} magnet={magnet} dark={theme === "dark"}>
             {tool === "draw" && (
-              <div className="optbar">{tr("Шаблон новой дороги:")}<select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
+              <div className="optbar"><TemplatePicker value={tpl} onChange={setTpl} />
                 <div className="seg" title={tr("Как соединять точки: прямыми отрезками или дугой, которая плавно продолжает предыдущий отрезок")}>
                   <button className={arc ? "" : "on"} onClick={() => setArc(false)}>{tr("Прямая")}</button>
                   <button className={arc ? "on" : ""} onClick={() => setArc(true)}>{tr("Дуга")}</button>
