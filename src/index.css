@@ -104,7 +104,16 @@ h3 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; text-transform: upper
 .start-btns button { padding: 10px 16px; font-size: 14px; }
 
 .bottom { position: relative; height: 320px; display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--line); }
-.bottom-open { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 2; }
+/* кнопка "Скрыть" на панелях и полоски, из которых скрытые панели открываются */
+.tabs button.hide { color: var(--muted); font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); }
+.tabs button.hide:hover { color: var(--fg); background: var(--panel-2); }
+.bottom-rail { display: flex; gap: 2px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); }
+.bottom-rail button { border: 0; border-radius: 0; background: none; padding: 7px 10px; color: var(--muted); }
+.bottom-rail button:hover { color: var(--accent); background: var(--accent-bg); }
+.rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; background: var(--panel); border-left: 1px solid var(--line); min-height: 0; }
+.rail button { writing-mode: vertical-rl; border: 0; background: none; padding: 10px 6px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.rail button:hover { color: var(--accent); background: var(--accent-bg); }
+.rail .badge, .rail .arrow { margin: 0; writing-mode: horizontal-tb; }
 .tabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 9px 6px; color: var(--muted); }
 .tabs button.on { color: var(--fg); border-bottom-color: var(--accent); background: none; }
@@ -183,10 +192,18 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .norms .hint { grid-column: 1 / -1; }
 
 .cmp { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; padding: 8px 10px; overflow: hidden; }
+/* таблица прокручивается внутри своей колонки, а не налезает на соседнюю */
+.cmp > table { display: block; }
 .cmp > table, .cmp-list { overflow: auto; }
 .cmp-list { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .cmp td.good { color: var(--ok); font-weight: 600; }
 .cmp td.bad { color: var(--danger); font-weight: 600; }
+/* узкая нижняя панель: части расчетов и сравнения встают друг под другом */
+.bottom { container-type: inline-size; }
+@container (max-width: 700px) {
+  .cmp, .calc { grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; overflow-y: auto; }
+  .calc .chart-box { min-height: 220px; }
+}
 .kind { font-size: 11px; padding: 1px 7px; border-radius: 999px; }
 .kind.added { background: var(--ok-bg); color: var(--ok); }
 .kind.changed { background: var(--accent-bg); color: var(--accent); }

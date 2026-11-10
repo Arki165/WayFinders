@@ -32,7 +32,8 @@ export default function App() {
   const version = useEditor((s) => s.version);
   const st = useEditor;
 
-  const [side, setSide] = useState<"props" | "errors" | "history">("props");
+  // null - панель скрыта, вместо нее узкая полоска с вкладками
+  const [side, setSide] = useState<"props" | "errors" | "history" | null>("props");
   const [bottom, setBottom] = useState<"calc" | "compare" | null>("calc");
   // размеры панелей в пикселях, меняются перетаскиванием края
   const [sideWidth, setSideWidth] = useState(360);
@@ -175,7 +176,7 @@ export default function App() {
         <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
       </header>
 
-      <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${sideWidth}px` }}>
+      <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${side ? sideWidth + "px" : "36px"}` }}>
         <nav className="tools">
           {TOOLS.map((t) => (
             <button key={t.id} className={"tool" + (tool === t.id ? " on" : "")} onClick={() => setTool(t.id)} title={`${t.label} (${t.key})`} disabled={!data}>
@@ -210,25 +211,40 @@ export default function App() {
                 <button className={bottom === "calc" ? "on" : ""} onClick={() => setBottom("calc")}>Расчеты и графики</button>
                 <button className={bottom === "compare" ? "on" : ""} onClick={() => setBottom("compare")}>Сравнение с исходным</button>
                 <span className="grow" />
-                <button onClick={() => setBottom(null)} title="Свернуть">▾</button>
+                <button className="hide" onClick={() => setBottom(null)} title="Скрыть панель и отдать место карте">Скрыть ▾</button>
               </div>
               {bottom === "calc" ? <CalcPanel /> : <ComparePanel />}
             </section>
           )}
-          {!bottom && data && <button className="bottom-open" onClick={() => setBottom("calc")}>▴ Расчеты и сравнение</button>}
+          {!bottom && data && (
+            <div className="bottom-rail" title="Открыть нижнюю панель">
+              <button onClick={() => setBottom("calc")}>▴ Расчеты и графики</button>
+              <button onClick={() => setBottom("compare")}>▴ Сравнение с исходным</button>
+            </div>
+          )}
         </main>
 
-        <aside className="side">
-          <Resizer dir="x" value={sideWidth} min={280} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
-          <div className="tabs">
-            <button className={side === "props" ? "on" : ""} onClick={() => setSide("props")}>Свойства</button>
-            <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
-            <button className={side === "history" ? "on" : ""} onClick={() => setSide("history")}>История</button>
-          </div>
-          {side === "props" && <PropsPanel />}
-          {side === "errors" && <ErrorsPanel />}
-          {side === "history" && <HistoryPanel />}
-        </aside>
+        {side ? (
+          <aside className="side">
+            <Resizer dir="x" value={sideWidth} min={280} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
+            <div className="tabs">
+              <button className={side === "props" ? "on" : ""} onClick={() => setSide("props")}>Свойства</button>
+              <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
+              <button className={side === "history" ? "on" : ""} onClick={() => setSide("history")}>История</button>
+              <span className="grow" />
+              <button className="hide" onClick={() => setSide(null)} title="Скрыть панель и отдать место карте">Скрыть ▸</button>
+            </div>
+            {side === "props" && <PropsPanel />}
+            {side === "errors" && <ErrorsPanel />}
+            {side === "history" && <HistoryPanel />}
+          </aside>
+        ) : (
+          <aside className="rail" title="Открыть правую панель">
+            <button onClick={() => setSide("props")}><span className="arrow">◂</span>Свойства</button>
+            <button onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
+            <button onClick={() => setSide("history")}>История</button>
+          </aside>
+        )}
       </div>
 
       <footer className="statusbar">
