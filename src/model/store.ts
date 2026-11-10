@@ -36,7 +36,8 @@ interface EditorState {
   ignored: Set<string>;
   norms: Norms;
   analysis: number[]; // дороги, добавленные в расчет
-  focus: { lat: number; lon: number; zoom?: number; t: number } | null;
+  // куда перелететь карте: точка с масштабом или рамка [запад, юг, восток, север]
+  focus: { lat: number; lon: number; zoom?: number; bounds?: [number, number, number, number]; t: number } | null;
   highlight: number[];
   message: { text: string; t: number } | null;
 
@@ -49,6 +50,7 @@ interface EditorState {
   recheck: () => void;
   toast: (text: string) => void;
   flyTo: (lat: number, lon: number, zoom?: number) => void;
+  fitTo: (bounds: [number, number, number, number]) => void;
   setNorms: (n: Norms) => void;
   setAnalysis: (ids: number[]) => void;
   ignore: (key: string) => void;
@@ -137,6 +139,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   toast: (text) => set({ message: { text, t: Date.now() } }),
   flyTo: (lat, lon, zoom) => set({ focus: { lat, lon, zoom, t: Date.now() } }),
+  fitTo: (b) => set({ focus: { lat: (b[1] + b[3]) / 2, lon: (b[0] + b[2]) / 2, bounds: b, t: Date.now() } }),
   setNorms: (norms) => { saveNorms(norms); set({ norms, version: get().version + 1 }); },
   setAnalysis: (analysis) => set({ analysis, version: get().version + 1 }),
   ignore: (key) => { const s = new Set(get().ignored); s.add(key); set({ ignored: s }); get().recheck(); },

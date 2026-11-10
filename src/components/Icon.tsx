@@ -49,6 +49,10 @@ const ICONS = {
   turnLeft: <><path d="M18 21v-7a4 4 0 0 0-4-4H5" /><path d="M9 6l-4 4 4 4" /></>,
   turnRight: <><path d="M6 21v-7a4 4 0 0 1 4-4h9" /><path d="M15 6l4 4-4 4" /></>,
   bookmark: <><path d="M6 3.5h12V21l-6-4-6 4z" /><path d="M12 7.5v5M9.5 10h5" /></>,
+  // улица: две кромки дороги и прерывистая осевая
+  road: <><path d="M7 21L10 3M17 21L14 3" /><path d="M12 5v2.5M12 11v2.5M12 17v2.5" /></>,
+  // остановка: табличка на столбе
+  stop: <><rect x="6" y="3" width="12" height="9" rx="2" /><path d="M12 12v9M9 21h6M9.5 7.5h5" /></>,
 };
 
 export type IconName = keyof typeof ICONS;

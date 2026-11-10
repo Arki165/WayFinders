@@ -13,6 +13,7 @@ import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
 import { VERSION } from "./version";
+import StreetSearch from "./components/StreetSearch";
 import Icon, { Logo, type IconName } from "./components/Icon";
 
 // Инструменты слева, по группам: выбор | рисование | связи дорог | светофор | удаление. group - с него начинается новая группа
@@ -177,20 +178,9 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const crit = check?.errors.filter((e) => e.sev === "danger").length ?? 0;
-  const names = data ? [...new Set([...data.ways.values()].map((w) => w.tags.highway && w.tags.name).filter(Boolean) as string[])].sort() : [];
   const signals = data ? (() => { const on = drivableNodeSet(data); return [...data.nodes.values()].filter((n) => isRoadSignal(n, on)).length; })() : 0;
   void version;
 
-  function search(q: string) {
-    if (!data || !q.trim()) return;
-    const ws = [...data.ways.values()].filter((w) => w.tags.highway && (w.tags.name ?? "").toLowerCase().includes(q.trim().toLowerCase()));
-    if (!ws.length) return st.getState().toast("Улица не найдена");
-    st.getState().setHighlight(ws.map((w) => w.id));
-    st.getState().select({ kind: "way", id: ws[0].id });
-    const n = data.nodes.get(ws[0].nodeIds[Math.floor(ws[0].nodeIds.length / 2)])!;
-    st.getState().flyTo(n.lat, n.lon, 16.5);
-    setSide("props");
-  }
 
   return (
     <div className="app">
@@ -213,11 +203,7 @@ export default function App() {
           <button className="tb-icon" onClick={() => st.getState().undo()} disabled={!past.length} title="Отменить (Ctrl+Z)"><Icon name="undo" /></button>
           <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!data} title="Повторить (Ctrl+Y)"><Icon name="redo" /></button>
         </div>
-        <label className="tb-search">
-          <Icon name="search" size={16} />
-          <input list="streets" placeholder="Найти улицу" disabled={!data} onKeyDown={(e) => e.key === "Enter" && search((e.target as HTMLInputElement).value)} onChange={(e) => names.includes(e.target.value) && search(e.target.value)} />
-        </label>
-        <datalist id="streets">{names.map((n) => <option key={n} value={n} />)}</datalist>
+        <StreetSearch onPick={() => setSide("props")} />
         <span className="grow" />
         <div className="tb-group">
           <button className={!view3d ? "on" : ""} onClick={() => setView3d(false)} title="Вид сверху">2D</button>

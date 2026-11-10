@@ -387,7 +387,12 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   }, [basemap]);
   useEffect(() => { darkMap = dark; underground = level === "metro"; applyDark(); }, [dark, level]);
   useEffect(() => { mapRef.current?.easeTo({ pitch: view3d ? 55 : 0, bearing: view3d ? -20 : 0, duration: 600 }); }, [view3d]);
-  useEffect(() => { if (focus) mapRef.current?.flyTo({ center: [focus.lon, focus.lat], zoom: focus.zoom ?? Math.max(mapRef.current.getZoom(), 17), duration: 700 }); }, [focus]);
+  useEffect(() => {
+    if (!focus || !mapRef.current) return;
+    // рамка: показать объект целиком (например, всю улицу из поиска), но не ближе масштаба 17.5
+    if (focus.bounds) mapRef.current.fitBounds([[focus.bounds[0], focus.bounds[1]], [focus.bounds[2], focus.bounds[3]]], { padding: 70, maxZoom: 17.5, duration: 700 });
+    else mapRef.current.flyTo({ center: [focus.lon, focus.lat], zoom: focus.zoom ?? Math.max(mapRef.current.getZoom(), 17), duration: 700 });
+  }, [focus]);
   useEffect(() => {
     const b = data?.bounds;
     if (b && mapRef.current) mapRef.current.fitBounds([[b.minlon, b.minlat], [b.maxlon, b.maxlat]], { padding: 30, duration: 0 });
