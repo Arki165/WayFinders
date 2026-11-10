@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, addWay, type DrawPoint, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -122,6 +122,7 @@ const ARROW_ICON = {
 // Перетаскивание узла: с какого приближения можно и через сколько пикселей начинается
 const DRAG_MIN_ZOOM = 14;
 const DRAG_START_PX = 4;
+const MAG_PX = 14; // радиус магнита при рисовании, пиксели
 
 // Видимая область карты [юг, запад, север, восток] для загрузки района из OSM
 let currentMap: maplibregl.Map | null = null;
@@ -261,16 +262,17 @@ interface Props {
   showBuildings: boolean;
   showChanges: boolean;
   drawTemplate: string;
+  magnet: boolean; // точки новой линии прилипают к ближним узлам и дорогам
   dark: boolean;
   children?: ReactNode; // панель над картой под подсказкой (например, выбор шаблона новой дороги)
 }
 
-export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, dark, children }: Props) {
+export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, magnet, dark, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [zoom, setZoom] = useState(15);
-  const [draw, setDraw] = useState<{ id: number | null; lat: number; lon: number }[]>([]);
+  const [draw, setDraw] = useState<DrawPoint[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number] } | null>(null);
 
@@ -297,8 +299,10 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
 
   // актуальные значения для обработчиков событий карты
-  const live = useRef({ tool, draw, selection, drawTemplate, dark });
-  live.current = { tool, draw, selection, drawTemplate, dark };
+  const live = useRef({ tool, draw, selection, drawTemplate, magnet, dark });
+  live.current = { tool, draw, selection, drawTemplate, magnet, dark };
+  // куда прилипнет точка под курсором при рисовании (кружок на карте)
+  const [snapMark, setSnapMark] = useState<DrawPoint | null>(null);
 
   // ---------- создание карты ----------
   useEffect(() => {
@@ -333,6 +337,49 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
 
     const pick = (x: number, y: number, layerIds?: string[]) => overlay.pickObject({ x, y, radius: 6, layerIds });
 
+    // Магнит при рисовании: точка у курсора прилипает к ближнему узлу (до MAG_PX пикселей),
+    // иначе к линии ближней дороги. Дорога липнет к дорогам, тротуар - к дорогам и дорожкам.
+    // Здания и рельсы магнитом не пользуются (рельсы стыкуются сами).
+    const snapAt = (x: number, y: number, lat: number, lon: number): DrawPoint => {
+      const free: DrawPoint = { id: null, lat, lon };
+      const d = useEditor.getState().data;
+      const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
+      if (!d || !live.current.magnet || tpl.kind === "area" || tpl.kind === "track") return free;
+      const ok = (w: OsmWay) => (tpl.kind === "path" ? !!w.tags.highway && w.tags.area !== "yes" : isDrivable(w));
+      // сколько градусов в MAG_PX пикселях: узлы дальше даже не проверяем
+      const c = map.unproject([x + MAG_PX, y + MAG_PX]);
+      const dLon = Math.abs(c.lng - lon), dLat = Math.abs(c.lat - lat);
+      let best: DrawPoint | null = null, bestPx = MAG_PX;
+      for (const w of d.ways.values()) {
+        if (!ok(w)) continue;
+        for (const id of w.nodeIds) {
+          const n = d.nodes.get(id);
+          if (!n || Math.abs(n.lon - lon) > dLon || Math.abs(n.lat - lat) > dLat) continue;
+          const p = map.project([n.lon, n.lat]);
+          const px = Math.hypot(p.x - x, p.y - y);
+          if (px < bestPx) { bestPx = px; best = { id, lat: n.lat, lon: n.lon }; }
+        }
+      }
+      if (best) return best;
+      // узла рядом нет: ищем линию дороги под курсором и ближнюю точку на ней
+      const hit = overlay.pickObject({ x, y, radius: 10, layerIds: tpl.kind === "path" ? ["roads", "lanes", "others"] : ["roads", "lanes"] });
+      const wid = hit?.layer?.id === "lanes" ? (hit.object as LaneItem).wayId : (hit?.object as RoadItem | undefined)?.id;
+      const w = wid !== undefined ? d.ways.get(wid) : undefined;
+      if (!w || !ok(w)) return free;
+      let on: DrawPoint | null = null, onPx = Infinity; // ближайшая точка на линии дороги
+      for (let i = 1; i < w.nodeIds.length; i++) {
+        const a = d.nodes.get(w.nodeIds[i - 1]), b = d.nodes.get(w.nodeIds[i]);
+        if (!a || !b) continue;
+        const pa = map.project([a.lon, a.lat]), pb = map.project([b.lon, b.lat]);
+        const vx = pb.x - pa.x, vy = pb.y - pa.y, L2 = vx * vx + vy * vy || 1;
+        const t = Math.max(0, Math.min(1, ((x - pa.x) * vx + (y - pa.y) * vy) / L2));
+        const px = Math.hypot(pa.x + vx * t - x, pa.y + vy * t - y);
+        if (px < onPx) { onPx = px; on = { id: null, lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, onWay: w.id }; }
+      }
+      // курсор над самой дорогой (широкая дорога вблизи): точка встает на ее ось, как бы далеко от оси ни был клик
+      return on ?? free;
+    };
+
     map.on("mousedown", (e) => {
       // с Shift узел не таскаем: Shift+клик выделяет участок между узлами
       if (live.current.tool !== "select" || e.originalEvent.shiftKey) return;
@@ -358,7 +405,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (n) { n.lat = e.lngLat.lat; n.lon = e.lngLat.lng; dr.moved = true; st.bump(); }
         return;
       }
-      if (live.current.tool === "draw" && live.current.draw.length) setCursor([e.lngLat.lng, e.lngLat.lat]);
+      if (live.current.tool === "draw") {
+        const sp = snapAt(e.point.x, e.point.y, e.lngLat.lat, e.lngLat.lng);
+        setSnapMark(sp.id !== null || sp.onWay !== undefined ? sp : null);
+        if (live.current.draw.length) setCursor([sp.lon, sp.lat]);
+      }
     });
     map.on("mouseup", () => {
       const dr = dragRef.current;
@@ -401,7 +452,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (nodeId === null && wayId === null) st.setHighlight([]);
       } else if (t === "draw") {
         const p = nodeId !== null ? st.data.nodes.get(nodeId)! : null;
-        const pt = p ? { id: p.id, lat: p.lat, lon: p.lon } : { id: null, lat: e.lngLat.lat, lon: e.lngLat.lng };
+        const pt: DrawPoint = p ? { id: p.id, lat: p.lat, lon: p.lon } : snapAt(e.point.x, e.point.y, e.lngLat.lat, e.lngLat.lng);
         // дорогу сквозь здание не рисуем: точка не ставится, программа объясняет почему
         const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
         const prev = live.current.draw;
@@ -478,7 +529,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-  useEffect(() => { if (tool !== "draw") { setDraw([]); setCursor(null); } }, [tool]);
+  useEffect(() => { if (tool !== "draw") { setDraw([]); setCursor(null); setSnapMark(null); } }, [tool]);
 
   // ---------- подложка, 3D, перелет ----------
   useEffect(() => {
@@ -821,12 +872,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new PathLayer({ id: "section", data: sectionPath.length > 1 ? [{ path: sectionPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 230], getWidth: 7, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer({ id: "draw", data: drawPath.length > 1 ? [{ path: drawPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 255], getWidth: 3, widthUnits: "pixels" }),
         new ScatterplotLayer({ id: "draw-pts", data: draw, getPosition: (d) => [d.lon, d.lat], getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 255] }),
+        // кольцо магнита: зеленое - прилипнет к узлу, синее - встанет на линию дороги новым общим узлом
+        new ScatterplotLayer({ id: "snap", data: snapMark && tool === "draw" ? [snapMark] : [], getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: "pixels", filled: false, stroked: true, getLineWidth: 2.5, lineWidthUnits: "pixels", getLineColor: (d) => (d.id !== null ? [40, 170, 90, 255] : [31, 111, 209, 255]) }),
     ].map((l) => l.clone({ parameters: flat }));
     overlay.setProps({
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
       layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers] : [buildingsLayer, ...groundLayers, ...pointLayers],
     });
-  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists]);
+  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark]);
 
   const hint: Record<string, string> = {
     select: "Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого.",

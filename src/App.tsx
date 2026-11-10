@@ -68,6 +68,9 @@ export default function App() {
   const [buildings, setBuildings] = useState(saved.buildings ?? true);
   const [changesOn, setChangesOn] = useState(false);
   const [tpl, setTpl] = useState("secondary");
+  // магнит при рисовании, выбор запоминается
+  const [magnet, setMagnet] = useState(() => { try { return localStorage.getItem("magnet") !== "off"; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem("magnet", magnet ? "on" : "off"); } catch { /* хранилище недоступно */ } }, [magnet]);
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
@@ -249,10 +252,11 @@ export default function App() {
         </nav>
 
         <main className="center">
-          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} dark={theme === "dark"}>
+          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} magnet={magnet} dark={theme === "dark"}>
             {tool === "draw" && (
               <div className="optbar">Шаблон новой дороги:
                 <select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
+                <label className="check" title="Точка прилипает к ближнему узлу или встает на линию дороги общим узлом"><input type="checkbox" checked={magnet} onChange={(e) => setMagnet(e.target.checked)} />Магнит</label>
               </div>
             )}
           </MapView>

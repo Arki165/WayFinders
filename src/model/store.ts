@@ -205,15 +205,51 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
   ed().run("Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
 }
 
-export function addWay(points: { id: number | null; lat: number; lon: number }[], tags: Tags) {
+// Точка новой линии: id - существующий узел, onWay - точка прилипла к дороге (там появится общий узел)
+export type DrawPoint = { id: number | null; lat: number; lon: number; onWay?: number };
+
+// Дороги, которые идут по тому же отрезку дороги w, что и точка (lat, lon): в них тоже вставляем узел
+function waysOnSegment(d: OsmData, w: OsmWay, lat: number, lon: number): OsmWay[] {
+  const seg = nearestSegment(d, w, lat, lon);
+  if (seg.idx < 0) return [];
+  const a = w.nodeIds[seg.idx - 1], b = w.nodeIds[seg.idx];
+  return [...d.ways.values()].filter((x) => x.nodeIds.some((id, i) => i > 0 && ((x.nodeIds[i - 1] === a && id === b) || (x.nodeIds[i - 1] === b && id === a))));
+}
+
+export function addWay(points: DrawPoint[], tags: Tags) {
   const d = ed().data!;
   if (lineHitsBuilding(points, tags)) { ed().toast(THROUGH_BUILDING); return false; }
   let wid = 0;
   const track = !!tags.railway;
+  // дороги, к которым прилипли точки: они меняются (в них новый узел), нужны в снимке для отмены
+  const glued: number[] = [];
+  for (const p of points) {
+    const w = p.onWay !== undefined ? d.ways.get(p.onWay) : undefined;
+    if (w) for (const x of waysOnSegment(d, w, p.lat, p.lon)) glued.push(x.id);
+  }
   // рельсы могут получить переезды на дорогах, эти дороги нужны в снимке для отмены
-  ed().run(track ? "Новые пути" : tags.building ? "Новое здание" : "Новая дорога", track ? roadsNear(d, points) : [], [], () => {
+  ed().run(track ? "Новые пути" : tags.building ? "Новое здание" : "Новая дорога", [...new Set([...(track ? roadsNear(d, points) : []), ...glued])], [], () => {
     const ids = points.map((p, i) => {
       if (p.id !== null) return p.id;
+      // точка на дороге: ставим узел точно на линию дороги и вставляем его во все дороги этого отрезка
+      const w = p.onWay !== undefined ? d.ways.get(p.onWay) : undefined;
+      if (w) {
+        const seg = nearestSegment(d, w, p.lat, p.lon);
+        if (seg.idx > 0) {
+          const [lat, lon] = seg.pr.toLatLon(seg.q[0], seg.q[1]);
+          const a = w.nodeIds[seg.idx - 1], b = w.nodeIds[seg.idx];
+          // почти в узел дороги - берем этот узел
+          for (const id of [a, b]) { const m = d.nodes.get(id)!; if (distM(m.lat, m.lon, lat, lon) < 1) return id; }
+          const id = newId();
+          d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
+          for (const x of d.ways.values())
+            for (let k = x.nodeIds.length - 1; k > 0; k--) {
+              const q = x.nodeIds[k - 1], c = x.nodeIds[k];
+              if ((q === a && c === b) || (q === b && c === a)) x.nodeIds.splice(k, 0, id);
+            }
+          return id;
+        }
+      }
       // рельсы сами стыкуются с соседними путями того же вида, если конец ближе 15 м
       if (track && (i === 0 || i === points.length - 1)) {
         const near = nearestNode(d, p.lat, p.lon, DOCK_M, (w) => w.tags.railway === tags.railway);
