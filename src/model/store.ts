@@ -409,6 +409,35 @@ function tornFix(d: OsmData, e: GraphError): boolean {
   const pr = makeProjection(e.lat, e.lon);
   const xy = (id: number): [number, number] => { const n = d.nodes.get(id)!; return pr.toXY(n.lat, n.lon); };
   const pa = xy(other.nodeIds[idx - 1]), pb = xy(other.nodeIds[idx]);
+  const road0 = d.ways.get(e.ways[0]);
+  if (!road0) return false;
+  // Последний отрезок дороги уже пересекает соседнюю дорогу (конец торчит за нее): ставим общий узел
+  // в точке пересечения, хвост оставляем как есть. Иначе дорога вернулась бы назад зубцом.
+  const atEnd = road0.nodeIds[road0.nodeIds.length - 1] === e.node;
+  const prevId = atEnd ? road0.nodeIds[road0.nodeIds.length - 2] : road0.nodeIds[1];
+  if (prevId !== undefined) {
+    const p1 = xy(prevId), p2 = xy(e.node);
+    const den = (p2[0] - p1[0]) * (pb[1] - pa[1]) - (p2[1] - p1[1]) * (pb[0] - pa[0]);
+    if (Math.abs(den) > 1e-9) {
+      const t = ((pa[0] - p1[0]) * (pb[1] - pa[1]) - (pa[1] - p1[1]) * (pb[0] - pa[0])) / den;
+      const u = ((pa[0] - p1[0]) * (p2[1] - p1[1]) - (pa[1] - p1[1]) * (p2[0] - p1[0])) / den;
+      if (t > 0 && t < 1 && u >= 0 && u <= 1) {
+        const X: [number, number] = [p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1])];
+        let id: number;
+        if (Math.hypot(X[0] - pa[0], X[1] - pa[1]) < 0.5) id = other.nodeIds[idx - 1];
+        else if (Math.hypot(X[0] - pb[0], X[1] - pb[1]) < 0.5) id = other.nodeIds[idx];
+        else {
+          const [lat, lon] = pr.toLatLon(X[0], X[1]);
+          id = newId();
+          d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
+          other.nodeIds.splice(idx, 0, id);
+        }
+        const j = road0.nodeIds.indexOf(e.node);
+        road0.nodeIds.splice(atEnd ? j : j + 1, 0, id);
+        return true;
+      }
+    }
+  }
   const { q } = project(xy(e.node), pa, pb);
   // Конец дороги не двигаем и не сливаем: он бывает общим с лестницей, забором или входом в здание
   // и несет свои теги. Дорогу продлеваем до точки на соседней дороге (существующей, если она ближе 0,5 м).

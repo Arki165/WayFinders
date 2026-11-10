@@ -217,6 +217,25 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
     for (const k of cells) put(k, i);
   });
 
+  // Заборы и стены (линии barrier). Конец дороги у забора не соединяем: проезда нет, если в данных нет ворот.
+  const fences: [number, number, number, number][] = [], onFence = new Set<number>();
+  for (const w of data.ways.values()) {
+    if (!w.tags.barrier || w.tags.barrier === "gate" || isDrivable(w)) continue;
+    for (const id of w.nodeIds) onFence.add(id);
+    for (let i = 1; i < w.nodeIds.length; i++) {
+      if (!data.nodes.has(w.nodeIds[i - 1]) || !data.nodes.has(w.nodeIds[i])) continue;
+      const a = xy(w.nodeIds[i - 1]), c = xy(w.nodeIds[i]);
+      fences.push([a[0], a[1], c[0], c[1]]);
+    }
+  }
+  const crossesFence = (p: [number, number], q: [number, number]) => fences.some(([x1, y1, x2, y2]) => {
+    if (Math.max(x1, x2) < Math.min(p[0], q[0]) || Math.min(x1, x2) > Math.max(p[0], q[0]) || Math.max(y1, y2) < Math.min(p[1], q[1]) || Math.min(y1, y2) > Math.max(p[1], q[1])) return false;
+    const d = (q[0] - p[0]) * (y2 - y1) - (q[1] - p[1]) * (x2 - x1);
+    if (Math.abs(d) < 1e-9) return false;
+    const t = ((x1 - p[0]) * (y2 - y1) - (y1 - p[1]) * (x2 - x1)) / d, u = ((x1 - p[0]) * (q[1] - p[1]) - (y1 - p[1]) * (q[0] - p[0])) / d;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  });
+
   // 2. Разорванные перекрестки: конец дороги ближе 12 м к другой дороге, но не соединен
   for (const w of roads) {
     for (const end of [w.nodeIds[0], w.nodeIds[w.nodeIds.length - 1]]) {
@@ -232,6 +251,10 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
         const { d } = project(p, xy(s[1]), xy(s[2]));
         if (d < 12 && (!best || d < best.d)) best = { d, s };
       }
+      // дорога уже соединена с той, к которой близко подходит ее конец (хвост за перекрестком, заезд на парковку) - это не разрыв
+      if (best && data.ways.get(best.s[0])?.nodeIds.some((id) => w.nodeIds.includes(id))) best = null;
+      // между концом и дорогой забор или стена, или дорога упирается в забор - так и есть на местности
+      if (best && (onFence.has(end) || crossesFence(p, project(p, xy(best.s[1]), xy(best.s[2])).q))) best = null;
       if (best) {
         const n = data.nodes.get(end)!;
         errors.push({ key: "torn:" + end, type: "torn", sev: "danger", lat: n.lat, lon: n.lon, ways: [w.id, best.s[0]], node: end, seg: [best.s[1], best.s[2]], dist: best.d });
