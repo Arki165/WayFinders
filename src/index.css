@@ -245,6 +245,9 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
 
 /* легенда правок на карте (кнопка «Правки») */
 .legend { position: absolute; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; max-width: calc(100% - 220px); background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: 12px; pointer-events: none; z-index: 2; box-shadow: var(--shadow); }
+.heat-legend b { font-weight: 600; }
+.heat-legend .muted { color: var(--muted); white-space: normal; flex-basis: 100%; }
+.heat-legend.up { bottom: 46px; }
 .legend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .legend i { width: 14px; height: 6px; border-radius: 3px; }
 

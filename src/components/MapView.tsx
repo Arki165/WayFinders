@@ -7,7 +7,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
-import { calcWay, zLevel, Z_COLORS } from "../model/calc";
+import { calcWay, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
@@ -22,7 +22,7 @@ import Icon from "./Icon";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmData, OsmWay } from "../osm/types";
-import { tr, useLang } from "../i18n";
+import { locale, tr, useLang } from "../i18n";
 
 export type Basemap = "map" | "satellite";
 
@@ -227,6 +227,9 @@ type P3 = [number, number, number];
 const asphalt = (c: number[]): [number, number, number, number] => [c[0] * 0.35 + 105 * 0.65, c[1] * 0.35 + 108 * 0.65, c[2] * 0.35 + 104 * 0.65, c[3]];
 type RoadItem = { id: number; path: P3[]; color: [number, number, number, number]; width: number };
 type Pt = { id: number; pos: [number, number] };
+// Полоса картограммы загрузки: цвет по Z, ширина по интенсивности N, плашка со значением Z в середине
+type BandItem = { id: number; path: P3[]; color: [number, number, number]; n: number; z: number; mid: P3; long: boolean };
+const BAND_MIN = 4, BAND_MAX = 20; // ширина полосы картограммы на экране, пикселей
 type LaneItem = { wayId: number; index: number; path: P3[]; kind: string; width: number };
 
 // Высота мостов и какие концы мостов стыкуются с другим мостом (там съезда на землю нет)
@@ -702,6 +705,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     // переходы рисуются поверх дорог, остальные линии под ними
     // transit - выделенные полосы общественного транспорта, рисуются поверх дорог
     const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], transit: Line[] = [], buildings: { id: number; poly: [number, number][]; h: number }[] = [];
+    const bands: BandItem[] = [];
     const deg = new Map<number, number>();
     const ways = [...data.ways.values()];
     const br = bridgeInfo(data);
@@ -712,7 +716,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         for (const id of w.nodeIds) deg.set(id, (deg.get(id) ?? 0) + 1);
         const path = roadPath(data, w, br);
         let color: [number, number, number, number] = [...roadClass(w).color, 255];
-        if (heat) { const c = calcWay(data, w, norms); color = c.Z !== null ? [...Z_COLORS[zLevel(c.Z, norms)], 255] : [180, 180, 180, 160]; }
+        if (heat) {
+          const c = calcWay(data, w, norms);
+          color = c.Z !== null ? [...Z_COLORS[zLevel(c.Z, norms)], 255] : [180, 180, 180, 160];
+          // картограмма: дорога с замером попадает в список полос, ширина полосы потом считается от самой большой N
+          if (c.Z !== null && c.N !== null) {
+            const mid = pointAt(path, pathLength(path) / 2).pos;
+            bands.push({ id: w.id, path, color: [color[0], color[1], color[2]], n: c.N, z: c.Z, mid, long: c.L > 0.06 });
+          }
+        }
         if (w.tags.tunnel === "yes") color = [color[0], color[1], color[2], 110];
         roads.push({ id: w.id, path, color, width: roadWidth(w) });
         // автобусная полоса: красная полоса у края дороги (справа, слева или с двух сторон)
@@ -758,7 +770,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pois: Poi[] = cityPois(data);
     const metro = metroLines(data);
     const zebra = zebras(data, pois);
-    return { br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
+    // самая большая интенсивность на карте: от нее считается ширина полос картограммы
+    const nMax = bands.reduce((m, d) => Math.max(m, d.n), 0);
+    return { bands, nMax, br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
   }, [data, version, heat, norms, showBuildings, langId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- полосы и разметка в видимой части карты ----------
@@ -997,6 +1011,10 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // линия перехода под «зеброй»: когда зебра видна, линия почти прозрачная (по ней все равно можно кликнуть)
         new PathLayer({ id: "crossings", data: crossLines, getPath: (d) => d.path, getColor: (d): Rgba => (d.id === selWay?.id ? [31, 111, 209, 255] : hlSet.has(d.id) ? soften(HL, dark) : d.zebra && zebraData.length ? [d.color[0], d.color[1], d.color[2], 3] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight, zebraData.length > 0] } }),
         new PathLayer({ id: "zebra", data: zebraData, getPath: (d) => d, getColor: dark ? [225, 230, 236, 230] : [255, 255, 255, 245], getWidth: 0.5, widthUnits: "meters", widthMinPixels: 1, updateTriggers: { getColor: dark } }),
+        // картограмма загрузки: чем больше машин в час, тем шире полоса, цвет по Z
+        new PathLayer<BandItem>({ id: "heat-bands", data: heat && city ? layersData.bands : [], getPath: (d) => d.path, getColor: (d) => [d.color[0], d.color[1], d.color[2], laneClose ? 150 : 215], getWidth: (d) => BAND_MIN + (BAND_MAX - BAND_MIN) * (layersData.nMax ? d.n / layersData.nMax : 0), widthUnits: "pixels", capRounded: true, jointRounded: true, updateTriggers: { getColor: laneClose, getWidth: layersData.nMax } }),
+        // плашки со значением Z: вблизи у всех дорог, подальше только у длинных, чтобы не слипались
+        new TextLayer<BandItem>({ id: "heat-labels", data: heat && city && zoom >= 13.5 ? (zoom >= 15.5 ? layersData.bands : layersData.bands.filter((d) => d.long)) : [], getPosition: (d) => d.mid, getText: (d) => d.z.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }), getSize: 11, fontWeight: 700, getColor: [30, 32, 36, 255], background: true, getBackgroundColor: [255, 255, 255, 235], getBorderColor: (d) => [d.color[0], d.color[1], d.color[2], 255], getBorderWidth: 1.5, backgroundPadding: [4, 2], getTextAnchor: "middle", getAlignmentBaseline: "center" }),
         // правки поверх дорог: цветная линия по оси, видна на любом приближении
         new PathLayer<ChangedRoad>({ id: "changes-top", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 4, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         // метро на уровне «Метро»: яркие линии с белой обводкой поверх бледного города
@@ -1085,6 +1103,17 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         </button>
       )}
       {data && <LayersPanel level={level} show={show} onLevel={setLevel} onShow={setShow} metroCount={layersData?.metroCount ?? 0} />}
+      {/* легенда картограммы: цвета по порогам Z из нормативов, ширина по интенсивности */}
+      {data && heat && layersData && (
+        <div className={"legend heat-legend" + (showChanges ? " up" : "")}>
+          <b>{tr("Загрузка Z")}</b>
+          {Z_COLORS.map((c, i) => (
+            <span key={i} title={tr(Z_TEXT[i])}><i style={{ background: `rgb(${c.join(",")})` }} />{[tr("до {0}", norms.z1), `${norms.z1}-${norms.z2}`, `${norms.z2}-${norms.z3}`, tr("от {0}", norms.z3)][i]}</span>
+          ))}
+          <span><i style={{ background: "rgb(180,180,180)" }} />{tr("нет замера")}</span>
+          <span className="muted">{layersData.bands.length ? tr("Ширина полосы - интенсивность, до {0} авт/ч. Дорог с замером: {1}", layersData.nMax.toLocaleString(locale()), layersData.bands.length) : tr("Замеров пока нет: задайте интенсивность N в свойствах дороги")}</span>
+        </div>
+      )}
       {data && showChanges && (
         <div className="legend">
           {changes.length === 0 ? tr("Правок пока нет") : (["added", "changed", "deleted"] as ChangeKind[]).map((k) => (

@@ -879,4 +879,9 @@ export const EN: Record<string, string> = {
   "юго-западной": "southwest",
   "южной": "south",
   "≈ 0,7 задержка мала, ближе к 1 резко растет. Задержка в течение суток: интенсивность по часам из типового городского профиля (пики в 8 и 17 ч), замер": "≈ 0.7 the delay is small, closer to 1 it grows sharply. Delay over the day: hourly volume from a typical urban profile (peaks at 8 and 17 h), the measurement",
+  "до {0}": "under {0}",
+  "от {0}": "from {0}",
+  "нет замера": "no count",
+  "Ширина полосы - интенсивность, до {0} авт/ч. Дорог с замером: {1}": "Band width shows volume, up to {0} veh/h. Roads with counts: {1}",
+  "Замеров пока нет: задайте интенсивность N в свойствах дороги": "No counts yet: set the volume N in the road properties",
 };
