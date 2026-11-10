@@ -2,8 +2,15 @@
 // ловушки по направлениям, пустые атрибуты, мосты без layer
 import type { OsmData, OsmRelation } from "../osm/types";
 import { isDrivable } from "./roads";
-import { makeProjection, project } from "./geo";
+import { distM, makeProjection, project } from "./geo";
 import { buildingIndex, wayThroughBuilding } from "./buildings";
+
+// Сколько метров дороги без перекрестков еще нормально, по классу. Взяты с запасом:
+// за городом и на магистралях перекрестки редкие, в жилых кварталах частые. Съезды не проверяем.
+export const LONG_LIMIT_M: Record<string, number> = {
+  motorway: 5000, trunk: 3000, primary: 2000, secondary: 1500, tertiary: 1000,
+  unclassified: 1000, residential: 700, living_street: 400, service: 500,
+};
 
 // ---------- граница города ----------
 // Город из OSM скачивается по своей границе (Dialogs.tsx кладет ее в файл как отношение boundary=administrative).
@@ -99,7 +106,7 @@ function cityClips(data: OsmData): Clip[] {
 }
 
 export type Severity = "danger" | "warn" | "info";
-export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge" | "building";
+export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge" | "building" | "long";
 
 export interface GraphError {
   key: string;
@@ -117,6 +124,8 @@ export interface GraphError {
   count?: number;
   edge?: boolean;
   miss?: string[];
+  len?: number; // длина участка без перекрестков, м
+  limit?: number; // сколько допускается для этого класса, м
 }
 
 export interface ValidationResult {
@@ -336,6 +345,28 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
     // в Webots машина проедет сквозь стену, а в жизни такой дороги нет
     const hit = wayThroughBuilding(data, bix, w);
     if (hit) errors.push({ key: "building:" + w.id, type: "building", sev: "danger", lat: hit.at.lat, lon: hit.at.lon, ways: [w.id, hit.b.id] });
+  }
+
+  // 6. Слишком длинный участок без перекрестков: такую дорогу лучше соединить с соседними.
+  // Перекресток - узел, где сходятся три и больше направления. Это предупреждение, строить дорогу можно.
+  const dirs = new Map<number, number>();
+  for (const w of roads) w.nodeIds.forEach((id, i) => dirs.set(id, (dirs.get(id) ?? 0) + (i > 0 ? 1 : 0) + (i < w.nodeIds.length - 1 ? 1 : 0)));
+  for (const w of roads) {
+    const limit = LONG_LIMIT_M[w.tags.highway];
+    if (!limit) continue;
+    let len = 0, from = 0;
+    for (let i = 1; i < w.nodeIds.length; i++) {
+      const a = data.nodes.get(w.nodeIds[i - 1]), b = data.nodes.get(w.nodeIds[i]);
+      if (a && b) len += distM(a.lat, a.lon, b.lat, b.lon);
+      const end = i === w.nodeIds.length - 1;
+      if ((dirs.get(w.nodeIds[i]) ?? 0) >= 3 || end) {
+        if (len > limit) {
+          const mid = data.nodes.get(w.nodeIds[Math.floor((from + i) / 2)])!;
+          errors.push({ key: `long:${w.id}:${w.nodeIds[from]}`, type: "long", sev: "warn", lat: mid.lat, lon: mid.lon, ways: [w.id], len, limit });
+        }
+        len = 0; from = i;
+      }
+    }
   }
 
   return { errors: errors.filter((e) => !ignored.has(e.key)), nodes: ids.length, sccMain: mainS.size, components: compList.length };

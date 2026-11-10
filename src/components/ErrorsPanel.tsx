@@ -11,8 +11,11 @@ const TITLE: Record<GraphError["type"], string> = {
   attr: "Не заполнены атрибуты",
   bridge: "Мост без уровня",
   building: "Дорога сквозь здание",
+  long: "Длинный участок без перекрестков",
 };
 const FIX: Partial<Record<GraphError["type"], string>> = { torn: "Соединить", glued: "Добавить узел", isolated: "Удалить", attr: "Заполнить", bridge: "Поднять мост", building: "Мост над зданием" };
+// длина: до 1 км в метрах, дальше в километрах
+const km = (m: number) => (m < 1000 ? `${Math.round(m)} м` : `${(m / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} км`);
 const ORDER: Record<Severity, number> = { danger: 0, warn: 1, info: 2 };
 
 export default function ErrorsPanel() {
@@ -32,6 +35,7 @@ export default function ErrorsPanel() {
       case "trap": return `${e.count} узлов, ${e.ways.length} дорог: въехать можно, а выехать нельзя или наоборот. Проверьте направления движения. MatSim выкинет этот кусок.`;
       case "attr": return `«${nm(e.ways[0])}»: не задано: ${e.miss!.map((k) => (k === "lanes" ? "число полос" : k === "maxspeed" ? "скорость" : k)).join(" и ")}. Симуляторы подставят значения по умолчанию.`;
       case "bridge": return `«${nm(e.ways[0])}» отмечена мостом без уровня: может склеиться с дорогой под ней.`;
+      case "long": return `«${nm(e.ways[0])}»: ${km(e.len!)} без перекрестков (для этого класса до ${km(e.limit!)}). Дорогу лучше соединить с соседними. Это предупреждение, оставить можно.`;
       case "building": return `«${nm(e.ways[0])}» проходит сквозь здание: в Webots машины поедут через стену. Перенесите дорогу, сделайте мост или отметьте проезд под домом (арку).`;
     }
   };
