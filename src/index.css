@@ -245,6 +245,7 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
 
 /* легенда правок на карте (кнопка «Правки») */
 .legend { position: absolute; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; max-width: calc(100% - 220px); background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: 12px; pointer-events: none; z-index: 2; box-shadow: var(--shadow); }
+.legend { z-index: 1; }
 .legend b { font-weight: 600; }
 .legend .muted { color: var(--muted); }
 .heat-legend .muted { color: var(--muted); white-space: normal; flex-basis: 100%; }
@@ -532,3 +533,5 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .tp-tie { stroke: #82649f; stroke-width: 1.4; opacity: .6; }
 .tp-path { fill: #968273; }
 .tp-bld { fill: color-mix(in srgb, var(--fg) 35%, transparent); }
+.layers-base { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); padding: 4px 0 2px; }
+.layers-base input { flex: 1; min-width: 0; accent-color: var(--accent); }

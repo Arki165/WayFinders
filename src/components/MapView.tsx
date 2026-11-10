@@ -189,13 +189,14 @@ export function getMapBounds(): [number, number, number, number] | null {
 // Переключение темы перекрашивает уже созданную подложку
 let darkMap = false;
 let underground = false; // уровень «Метро»: подложка города бледная
+let baseFade = 1; // яркость подложки из панели «Слои»: 1 - как обычно, 0 - подложки не видно, только граф
 function applyDark() {
   const map = currentMap;
   if (!map || !map.getLayer("map")) return;
   map.setPaintProperty("bg", "background-color", bgColor(darkMap));
   const p = mapPaint(darkMap);
-  map.setPaintProperty("map", "raster-opacity", p["raster-opacity"] * (underground ? 0.45 : 1));
-  map.setPaintProperty("satellite", "raster-opacity", underground ? 0.45 : 1);
+  map.setPaintProperty("map", "raster-opacity", p["raster-opacity"] * (underground ? 0.45 : 1) * baseFade);
+  map.setPaintProperty("satellite", "raster-opacity", (underground ? 0.45 : 1) * baseFade);
   map.setPaintProperty("map", "raster-saturation", p["raster-saturation"]);
   map.setPaintProperty("map", "raster-hue-rotate", p["raster-hue-rotate"]);
   map.setPaintProperty("map", "raster-brightness-min", p["raster-brightness-min"]);
@@ -335,8 +336,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // уровень карты и видимые слои (панель «Слои»)
   const [layerCfg, setLayerCfg] = useState(loadLayers);
   const level: Level = layerCfg.level, show: LayerShow = layerCfg.show;
-  const setLevel = (l: Level) => { setLayerCfg({ level: l, show }); saveLayers(l, show); };
-  const setShow = (s: LayerShow) => { setLayerCfg({ level, show: s }); saveLayers(level, s); };
+  const setLevel = (l: Level) => { setLayerCfg({ ...layerCfg, level: l }); saveLayers(l, show, layerCfg.base); };
+  const setShow = (s: LayerShow) => { setLayerCfg({ ...layerCfg, show: s }); saveLayers(level, s, layerCfg.base); };
+  const setBase = (b: number) => { setLayerCfg({ ...layerCfg, base: b }); saveLayers(level, show, b); };
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
 
   // актуальные значения для обработчиков событий карты
@@ -687,7 +689,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     };
     if (map.getLayer("map")) apply(); else map.once("load", apply);
   }, [basemap]);
-  useEffect(() => { darkMap = dark; underground = level === "metro"; applyDark(); }, [dark, level]);
+  useEffect(() => { darkMap = dark; underground = level === "metro"; baseFade = layerCfg.base; applyDark(); }, [dark, level, layerCfg.base]);
   useEffect(() => {
     mapRef.current?.easeTo({ pitch: view3d ? 55 : 0, bearing: view3d ? -20 : 0, duration: 600 });
     globe3d = view3d;
@@ -1133,7 +1135,7 @@ new PathLayer<LaneLink>({ id: "lane-links", data: links, getPath: (d) => d.path,
           <Icon name="fitAll" size={15} />{selection ? tr("Вернуться к выбранному") : tr("Вернуться к графу")}
         </button>
       )}
-      {data && <LayersPanel level={level} show={show} onLevel={setLevel} onShow={setShow} metroCount={layersData?.metroCount ?? 0} />}
+      {data && <LayersPanel level={level} show={show} base={layerCfg.base} onLevel={setLevel} onShow={setShow} onBase={setBase} metroCount={layersData?.metroCount ?? 0} />}
       {/* легенда картограммы: цвета по порогам Z из нормативов, ширина по интенсивности */}
       {data && heat && layersData && (
         <div className={"legend heat-legend" + (showChanges ? " up" : "")}>

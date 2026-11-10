@@ -25,21 +25,21 @@ const ROWS: { key: LayerKey; name: string; icon?: string; color?: string }[] = [
 
 // Сохраняем выбор только у себя на компьютере, чтобы он не сбрасывался при перезапуске
 const KEY = "wayfinders-layers";
-export function loadLayers(): { level: Level; show: LayerShow } {
+export function loadLayers(): { level: Level; show: LayerShow; base: number } {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? "{}");
-    return { level: v.level === "metro" ? "metro" : "city", show: { ...DEFAULT_SHOW, ...(v.show ?? {}) } };
+    return { level: v.level === "metro" ? "metro" : "city", show: { ...DEFAULT_SHOW, ...(v.show ?? {}) }, base: typeof v.base === "number" ? Math.min(1, Math.max(0, v.base)) : 1 };
   } catch {
-    return { level: "city", show: { ...DEFAULT_SHOW } };
+    return { level: "city", show: { ...DEFAULT_SHOW }, base: 1 };
   }
 }
-export function saveLayers(level: Level, show: LayerShow) {
-  try { localStorage.setItem(KEY, JSON.stringify({ level, show })); } catch { /* хранилище недоступно */ }
+export function saveLayers(level: Level, show: LayerShow, base = 1) {
+  try { localStorage.setItem(KEY, JSON.stringify({ level, show, base })); } catch { /* хранилище недоступно */ }
 }
 
-interface Props { level: Level; show: LayerShow; onLevel: (l: Level) => void; onShow: (s: LayerShow) => void; metroCount: number }
+interface Props { level: Level; show: LayerShow; base: number; onLevel: (l: Level) => void; onShow: (s: LayerShow) => void; onBase: (b: number) => void; metroCount: number }
 
-export default function LayersPanel({ level, show, onLevel, onShow, metroCount }: Props) {
+export default function LayersPanel({ level, show, base, onLevel, onShow, onBase, metroCount }: Props) {
   const [open, setOpen] = useState(false);
   const hidden = ROWS.filter((r) => !show[r.key]).length;
   return (
@@ -63,6 +63,12 @@ export default function LayersPanel({ level, show, onLevel, onShow, metroCount }
               {r.name}
             </label>
           ))}
+          {/* яркость подложки: влево - только граф на ровном фоне, вправо - карта как обычно */}
+          <label className="layers-base" title={tr("Яркость подложки: влево - только граф, вправо - карта")}>
+            <span>{tr("Граф")}</span>
+            <input type="range" min={0} max={100} step={5} value={Math.round(base * 100)} onChange={(e) => onBase(Number(e.target.value) / 100)} />
+            <span>{tr("Карта")}</span>
+          </label>
           <div className="chips">
             <button onClick={() => onShow({ ...DEFAULT_SHOW })}>{tr("Показать все")}</button>
             <button onClick={() => onShow({ ...DEFAULT_SHOW, lanes: false, paths: false, rail: false, errors: false })} title={tr("Только дороги и объекты для движения")}>{tr("Только дороги")}</button>
