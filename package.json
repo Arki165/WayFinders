@@ -1,7 +1,7 @@
 {
   "name": "wayfinders",
   "productName": "WayFinders",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Редактор графа улично-дорожной сети на основе OpenStreetMap",
   "private": true,
   "main": "electron/main.cjs",
