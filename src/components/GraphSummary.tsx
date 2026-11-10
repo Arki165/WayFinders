@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { useEditor } from "../model/store";
 import { ROAD_CLASSES, drivableNodeSet, isDrivable, isRoadSignal, wayName } from "../model/roads";
 import { wayLengthM } from "../model/geo";
-import { calcWay, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
+import { calcWay, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { poiKind } from "../model/poi";
 
 // Классы дорог собраны в понятные группы, цвет берется у главного класса группы
@@ -40,8 +40,11 @@ export default function GraphSummary() {
       const g = GROUPS.findIndex((gr) => gr.classes.includes(w.tags.highway));
       if (g >= 0) byGroup[g] += len;
       for (const id of new Set(w.nodeIds)) useCount.set(id, (useCount.get(id) ?? 0) + 1);
-      const c = calcWay(data, w, norms);
-      if (c.Z !== null) measured.push({ id: w.id, name: wayName(w), z: c.Z });
+      // загрузка Z есть только у дорог с замером N, остальные не считаем
+      if (w.tags[MEASURE_KEYS.volume]) {
+        const c = calcWay(data, w, norms);
+        if (c.Z !== null) measured.push({ id: w.id, name: wayName(w), z: c.Z });
+      }
     }
     // перекресток - узел, где сходятся две и больше дорог
     let crossroads = 0;

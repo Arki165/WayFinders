@@ -196,6 +196,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const focus = useEditor((s) => s.focus);
   const norms = useEditor((s) => s.norms);
   const highlight = useEditor((s) => s.highlight);
+  // подсвеченные дороги (найденная улица, ошибка): красятся в слое, без пересборки всей карты
+  const hlSet = useMemo(() => new Set(highlight), [highlight]);
   const laneSel = useLane((s) => s.sel);
   // атлас значков (светофоры, переходы, остановки, метро) - одна картинка, грузится один раз
   const [iconAtlas, setIconAtlas] = useState<string | null>(null);
@@ -407,7 +409,6 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     // transit - выделенные полосы общественного транспорта, рисуются поверх дорог
     const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], transit: Line[] = [], buildings: { id: number; poly: [number, number][]; h: number }[] = [];
     const deg = new Map<number, number>();
-    const hl = new Set(highlight);
     const ways = [...data.ways.values()];
     const coord = (id: number): [number, number] => { const n = data.nodes.get(id)!; return [n.lon, n.lat]; };
     for (const w of ways) {
@@ -418,7 +419,6 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         let color: [number, number, number, number] = [...roadClass(w).color, 255];
         if (heat) { const c = calcWay(data, w, norms); color = c.Z !== null ? [...Z_COLORS[zLevel(c.Z, norms)], 255] : [180, 180, 180, 160]; }
         if (w.tags.tunnel === "yes") color = [color[0], color[1], color[2], 110];
-        if (hl.has(w.id)) color = [150, 90, 220, 255];
         roads.push({ id: w.id, path, color, width: roadWidth(w) });
         // автобусная полоса: красная полоса у края дороги (справа, слева или с двух сторон)
         const t = w.tags, both = t.busway === "lane" || t["busway:both"] === "lane";
@@ -432,14 +432,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         buildings.push({ id: w.id, poly: w.nodeIds.map(coord), h: lv * 3 });
       } else if (w.tags.railway === "tram" && w.tags.embedded === "yes") {
         // трамвай по проезжей части виден поверх дороги
-        transit.push({ id: w.id, path: w.nodeIds.map(coord), color: hl.has(w.id) ? [150, 90, 220, 255] : [130, 70, 190, 240], width: 1.6, rail: true });
+        transit.push({ id: w.id, path: w.nodeIds.map(coord), color: [130, 70, 190, 240], width: 1.6, rail: true });
       } else if (isMetroWay(w)) {
         continue; // метро рисуется своим слоем
       } else if (w.tags.highway || w.tags.railway) {
         const rail = !!w.tags.railway;
         // рельсы и переходы толще: их выбирают кликом
         const cross = w.tags.footway === "crossing";
-        (cross ? crossings : others).push({ id: w.id, path: w.nodeIds.map(coord), color: hl.has(w.id) ? [150, 90, 220, 255] : rail ? [130, 100, 160, 230] : cross ? [60, 60, 60, 220] : [150, 130, 115, 150], width: rail ? 3 : cross ? 3 : 1, rail });
+        (cross ? crossings : others).push({ id: w.id, path: w.nodeIds.map(coord), color: rail ? [130, 100, 160, 230] : cross ? [60, 60, 60, 220] : [150, 130, 115, 150], width: rail ? 3 : cross ? 3 : 1, rail });
       }
     }
     roads.sort((a, b) => roadClass(data.ways.get(a.id)!).rank - roadClass(data.ways.get(b.id)!).rank);
@@ -464,7 +464,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const metro = metroLines(data);
     const zebra = zebras(data, pois);
     return { roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
-  }, [data, version, heat, norms, showBuildings, highlight]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, version, heat, norms, showBuildings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- полосы и разметка в видимой части карты ----------
   const lanesOn = zoom >= LANES_ZOOM;
@@ -516,16 +516,39 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     return changedRoads(original, data);
   }, [data, original, version, showChanges]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---------- списки объектов для слоев по фильтрам «Слоев» ----------
+  // Держим их неизменными, пока не поменялись данные или фильтры: тогда deck.gl не загружает
+  // в видеокарту тысячи линий заново при каждом выборе дороги или сдвиге карты.
+  const cityLvl = level !== "metro";
+  const lanesShown = !!(show.roads && show.lanes && cityLvl && laneData);
+  const iconsOnZ = zoom >= ICONS_ZOOM, z125 = zoom >= 12.5, z14 = zoom >= 14, z15 = zoom >= 15, z156 = zoom >= 15.6;
+  const lists = useMemo(() => {
+    if (!layersData) return null;
+    const metroLvl = !cityLvl;
+    return {
+      others: cityLvl ? layersData.others.filter((o) => (o.rail ? show.rail : show.paths)) : [],
+      transit: cityLvl ? layersData.transit.filter((t) => (t.rail ? show.rail : show.roads && !(lanesShown && show.lanes))) : [],
+      pois: layersData.pois.filter((p) => {
+        if (p.kind === "metro") return show.metro && (metroLvl || z125);
+        if (p.kind === "entrance") return show.metro && (metroLvl ? z14 : z156);
+        if (!cityLvl || !iconsOnZ) return false;
+        return p.kind === "crossing" ? show.crossings : show.stops;
+      }),
+      stationNames: show.metro && (metroLvl || z15) ? layersData.pois.filter((p) => p.kind === "metro" && p.name) : [],
+    };
+  }, [layersData, show, cityLvl, lanesShown, iconsOnZ, z125, z14, z15, z156]);
+
   // ---------- слои deck.gl ----------
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    if (!data || !layersData) { overlay.setProps({ layers: [] }); return; }
+    if (!data || !layersData || !lists) { overlay.setProps({ layers: [] }); return; }
     const selWay = selection?.kind === "way" ? data.ways.get(selection.id) : undefined;
     const selIds = new Set(selection?.kind === "ways" ? selection.ids : []);
     const section = selection?.kind === "ways" && selection.section ? selection.section : null;
     const sectionPath = section ? section.nodes.map((id) => data.nodes.get(id)).filter(Boolean).map((n) => [n!.lon, n!.lat] as [number, number]) : [];
     const selNode = selection?.kind === "node" ? selection.id : null;
+    const HL: Rgba = [150, 90, 220, 255];
     const showNodes = zoom >= 16.5 || tool !== "select";
     const vertIds = selWay ? selWay.nodeIds : section ? [section.from, section.to] : [];
     const vertices: Pt[] = vertIds.filter((id) => data.nodes.has(id)).map((id) => { const n = data.nodes.get(id)!; return { id, pos: [n.lon, n.lat] as [number, number] }; });
@@ -538,20 +561,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const metroLvl = level === "metro", city = !metroLvl;
     const iconsOn = zoom >= ICONS_ZOOM;
     const roadsData = show.roads ? layersData.roads : [];
-    const othersData = city ? layersData.others.filter((o) => (o.rail ? show.rail : show.paths)) : [];
+    const othersData = lists.others;
     const lanesData = show.roads && show.lanes && city ? laneData : null;
     const crossLines = city && show.crossings ? layersData.crossings : [];
-    const transitData = city ? layersData.transit.filter((t) => (t.rail ? show.rail : show.roads && !(lanesData && show.lanes))) : [];
+    const transitData = lists.transit;
     const zebraData = city && show.crossings && zoom >= 15.6 ? layersData.zebra : [];
     const signalsData = city && show.signals ? layersData.signals : [];
-    const poiData = layersData.pois.filter((p) => {
-      if (p.kind === "metro") return show.metro && (metroLvl || zoom >= 12.5);
-      if (p.kind === "entrance") return show.metro && (metroLvl ? zoom >= 14 : zoom >= 15.6);
-      if (!city || !iconsOn) return false;
-      return p.kind === "crossing" ? show.crossings : show.stops;
-    });
+    const poiData = lists.pois;
     const metroData = show.metro ? layersData.metro : [];
-    const stationNames = show.metro && (metroLvl || zoom >= 15) ? layersData.pois.filter((p) => p.kind === "metro" && p.name) : [];
+    const stationNames = lists.stationNames;
     const errs = city && show.errors ? check?.errors ?? [] : [];
     const selPt = selNode !== null && data.nodes.has(selNode) ? [{ pos: [data.nodes.get(selNode)!.lon, data.nodes.get(selNode)!.lat] as [number, number] }] : [];
     const ghost: Rgba = dark ? [120, 130, 142, 80] : [110, 110, 105, 70]; // дороги на уровне «Метро»
@@ -565,15 +583,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const groundLayers = [
         // метро на уровне «Город»: тонкие линии под дорогами (оно под землей)
         new PathLayer({ id: "metro-under", data: city ? metroData : [], getPath: (d) => d.path, getColor: (d) => [...d.color, 130] as Rgba, getWidth: 3, widthUnits: "pixels", capRounded: true, jointRounded: true }),
-        new PathLayer({ id: "others", data: othersData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => (d.id === selWay?.id ? d.width + 2 : d.width), widthUnits: "pixels", widthMinPixels: 1, pickable: true, updateTriggers: { getColor: [dark, selWay?.id], getWidth: selWay?.id } }),
+        new PathLayer({ id: "others", data: othersData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => (d.id === selWay?.id ? d.width + 2 : d.width), widthUnits: "pixels", widthMinPixels: 1, pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight], getWidth: selWay?.id } }),
         // широкая цветная подложка под измененными дорогами
         new PathLayer<ChangedRoad>({ id: "changes", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 14, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({ id: "roads-casing", data: city ? roadsData : [], getPath: (d) => d.path, getColor: dark ? [10, 13, 17, 230] : [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({
           id: "roads", data: roadsData, getPath: (d) => d.path,
-          getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : metroLvl ? ghost : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
+          getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : metroLvl ? ghost : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
           capRounded: true, jointRounded: true, pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 120],
-          updateTriggers: { getColor: [selWay?.id, version, dark, selection, metroLvl] },
+          updateTriggers: { getColor: [selWay?.id, version, dark, selection, metroLvl, highlight] },
         }),
         // полосы поверх дороги: по ним можно кликнуть, выбранная подсвечена
         new PathLayer<LaneItem>({
@@ -584,23 +602,23 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
             if (d.kind === "bus") return soften([196, 92, 80, 255], dark);
             if (d.kind === "bicycle") return soften([92, 165, 108, 255], dark);
             // асфальт с оттенком класса дороги: на нем видна белая разметка
-            const c = laneData?.color.get(d.wayId) ?? [200, 200, 200, 255];
+            const c = hlSet.has(d.wayId) ? HL : laneData?.color.get(d.wayId) ?? [200, 200, 200, 255];
             // в режиме загрузки Z и на отдалении цвет класса дороги важнее асфальта
             if (heat || !laneClose) return soften(c, dark);
             return soften([c[0] * 0.35 + 105 * 0.65, c[1] * 0.35 + 108 * 0.65, c[2] * 0.35 + 104 * 0.65, c[3]], dark);
           },
           pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 90],
-          updateTriggers: { getColor: [selWay?.id, laneSel?.wayId, laneSel?.index, version, dark, heat, selection, laneClose] },
+          updateTriggers: { getColor: [selWay?.id, laneSel?.wayId, laneSel?.index, version, dark, heat, selection, laneClose, highlight] },
         }),
         // полосы общественного транспорта: ширина в метрах, но не тоньше 3 пикселей, чтобы было видно издалека.
         // Автобусную полосу у края не рисуем там, где видны полосы по отдельности: там она сама полоса
-        new PathLayer({ id: "transit", data: transitData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true, pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
+        new PathLayer({ id: "transit", data: transitData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.rail && hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true, pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight] } }),
         // разметка: сплошные линии и штрихи прерывистых
         new PathLayer<{ path: P3[] }>({ id: "lane-lines", data: lanesData?.lines ?? [], getPath: (d) => d.path, getColor: dark ? [205, 210, 215, laneClose ? 210 : 120] : [255, 255, 255, laneClose ? 240 : 150], getWidth: 0.15, widthUnits: "meters", widthMinPixels: laneClose ? 1 : 0.6, updateTriggers: { getColor: [dark, laneClose] } }),
         new TextLayer<{ pos: P3; angle: number; text: string }>({ id: "lane-labels", data: lanesData?.labels ?? [], getPosition: (d) => d.pos, getText: (d) => d.text, getAngle: (d) => d.angle, getSize: 2.2, sizeUnits: "meters", sizeMinPixels: 6, getColor: dark ? [225, 230, 236, 235] : [255, 255, 255, 250], characterSet: ["↶", "←", "↖", "↑", "↗", "→", "А"], billboard: false, fontWeight: 700, updateTriggers: { getColor: dark } }),
         // «зебра» поперек проезжей части у пешеходных переходов (вблизи)
         new PathLayer({ id: "zebra", data: zebraData, getPath: (d) => d, getColor: dark ? [225, 230, 236, 230] : [255, 255, 255, 245], getWidth: 0.5, widthUnits: "meters", widthMinPixels: 1, updateTriggers: { getColor: dark } }),
-        new PathLayer({ id: "crossings", data: crossLines, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
+        new PathLayer({ id: "crossings", data: crossLines, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight] } }),
         // метро на уровне «Метро»: яркие линии с белой обводкой поверх бледного города
         new PathLayer({ id: "metro-casing", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: dark ? [20, 24, 30, 255] : [255, 255, 255, 255], getWidth: 10, widthUnits: "pixels", capRounded: true, jointRounded: true, updateTriggers: { getColor: dark } }),
         new PathLayer({ id: "metro", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: (d) => [...d.color, 255] as Rgba, getWidth: 6, widthUnits: "pixels", capRounded: true, jointRounded: true }),
@@ -627,7 +645,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
       layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers] : [buildingsLayer, ...groundLayers, ...pointLayers],
     });
-  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark]);
+  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists]);
 
   const hint: Record<string, string> = {
     select: "Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого.",

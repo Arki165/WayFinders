@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import MapView, { getMapBounds, type Basemap } from "./components/MapView";
 import PropsPanel from "./components/PropsPanel";
 import ErrorsPanel from "./components/ErrorsPanel";
@@ -178,7 +178,14 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const crit = check?.errors.filter((e) => e.sev === "danger").length ?? 0;
-  const signals = data ? (() => { const on = drivableNodeSet(data); return [...data.nodes.values()].filter((n) => isRoadSignal(n, on)).length; })() : 0;
+  // число светофоров для строки состояния: считаем только после правки, а не на каждую перерисовку
+  const signals = useMemo(() => {
+    if (!data) return 0;
+    const on = drivableNodeSet(data);
+    let n = 0;
+    for (const node of data.nodes.values()) if (isRoadSignal(node, on)) n++;
+    return n;
+  }, [data, version]); // eslint-disable-line react-hooks/exhaustive-deps
   void version;
 
 

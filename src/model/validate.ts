@@ -150,7 +150,7 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   const toLL = (p: [number, number]) => pr.toLatLon(p[0], p[1]);
 
   const roads = [...data.ways.values()].filter((w) => isDrivable(w) && w.nodeIds.length >= 2);
-  const deg = new Map<number, number>(), wayOf = new Map<number, Set<number>>();
+  const deg = new Map<number, number>(), wayOf = new Map<number, number[]>();
   const segs: [number, number, number, string][] = [];
   const parent = new Map<number, number>();
   const find = (x: number): number => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)!; } return x; };
@@ -161,8 +161,9 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   for (const w of roads) {
     const lay = w.tags.layer || "0", ow = w.tags.oneway, rnd = w.tags.junction === "roundabout";
     w.nodeIds.forEach((id, i) => {
-      if (!wayOf.has(id)) wayOf.set(id, new Set());
-      wayOf.get(id)!.add(w.id);
+      // у узла список дорог; одна дорога может пройти через узел дважды (кольцо), повтор не нужен
+      const list = wayOf.get(id);
+      if (!list) wayOf.set(id, [w.id]); else if (list[list.length - 1] !== w.id) list.push(w.id);
       if (i === 0) return;
       const a = w.nodeIds[i - 1];
       deg.set(id, (deg.get(id) || 0) + 1); deg.set(a, (deg.get(a) || 0) + 1);
@@ -174,7 +175,7 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   }
   const errors: GraphError[] = [];
   const center = (ids: number[]) => { let x = 0, y = 0; for (const id of ids) { const p = xy(id); x += p[0]; y += p[1]; } return toLL([x / ids.length, y / ids.length]); };
-  const waysOf = (ids: number[]) => [...new Set(ids.flatMap((id) => [...(wayOf.get(id) ?? [])]))];
+  const waysOf = (ids: number[]) => [...new Set(ids.flatMap((id) => wayOf.get(id) ?? []))];
 
   // 1. Изолированные куски (компоненты связности)
   const comps = new Map<number, number[]>();
@@ -191,21 +192,26 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   // Короткий отрезок кладем во все клетки его рамки (так быстрее). У длинного (дорога между городами)
   // рамка - это миллионы клеток и программа падала, поэтому его клетки берем только вдоль линии:
   // точки через 10 м, запас 17 м = 12 м поиска + половина шага.
-  const CELL = 40, STEP = 10, PAD = 17, grid = new Map<string, number[]>();
-  const put = (k: string, i: number) => { const c = grid.get(k); if (c) c.push(i); else grid.set(k, [i]); };
+  const CELL = 40, STEP = 10, PAD = 17, grid = new Map<number, number[]>();
+  // номер клетки одним числом: город меньше 4000 км, клеток по 40 м с каждой стороны хватает
+  const cellKey = (gx: number, gy: number) => (gx + 50000) * 100000 + (gy + 50000);
+  const put = (k: number, i: number) => { const c = grid.get(k); if (c) c.push(i); else grid.set(k, [i]); };
+  // координаты концов отрезков в одном массиве: x1, y1, x2, y2 подряд (так быстрее, чем искать узел каждый раз)
+  const sxy = new Float64Array(segs.length * 4);
   segs.forEach((s, i) => {
     const a = xy(s[1]), c = xy(s[2]);
+    sxy[i * 4] = a[0]; sxy[i * 4 + 1] = a[1]; sxy[i * 4 + 2] = c[0]; sxy[i * 4 + 3] = c[1];
     const gx0 = Math.floor((Math.min(a[0], c[0]) - 12) / CELL), gx1 = Math.floor((Math.max(a[0], c[0]) + 12) / CELL);
     const gy0 = Math.floor((Math.min(a[1], c[1]) - 12) / CELL), gy1 = Math.floor((Math.max(a[1], c[1]) + 12) / CELL);
     if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) <= 64) {
-      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) put(gx + ":" + gy, i);
+      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) put(cellKey(gx, gy), i);
       return;
     }
     const steps = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / STEP);
-    const cells = new Set<string>();
+    const cells = new Set<number>();
     for (let j = 0; j <= steps; j++) {
       const x = a[0] + ((c[0] - a[0]) * j) / steps, y = a[1] + ((c[1] - a[1]) * j) / steps;
-      for (const dx of [-PAD, PAD]) for (const dy of [-PAD, PAD]) cells.add(Math.floor((x + dx) / CELL) + ":" + Math.floor((y + dy) / CELL));
+      for (const dx of [-PAD, PAD]) for (const dy of [-PAD, PAD]) cells.add(cellKey(Math.floor((x + dx) / CELL), Math.floor((y + dy) / CELL)));
     }
     for (const k of cells) put(k, i);
   });
@@ -216,7 +222,7 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
       const p = xy(end);
       if (deg.get(end) !== 1 || !inside(p)) continue;
       let best: { d: number; s: [number, number, number, string] } | null = null;
-      for (const i of grid.get(Math.floor(p[0] / CELL) + ":" + Math.floor(p[1] / CELL)) ?? []) {
+      for (const i of grid.get(cellKey(Math.floor(p[0] / CELL), Math.floor(p[1] / CELL))) ?? []) {
         const s = segs[i];
         if (s[0] === w.id || s[1] === end || s[2] === end) continue;
         const { d } = project(p, xy(s[1]), xy(s[2]));
@@ -233,17 +239,22 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   const seen = new Set<string>();
   for (const cell of grid.values()) {
     for (let i = 0; i < cell.length; i++) for (let j = i + 1; j < cell.length; j++) {
+      const i1 = cell[i] * 4, i2 = cell[j] * 4;
+      // быстрая проверка: рамки отрезков не перекрываются - пересечения точно нет
+      if (Math.max(sxy[i1], sxy[i1 + 2]) < Math.min(sxy[i2], sxy[i2 + 2]) || Math.max(sxy[i2], sxy[i2 + 2]) < Math.min(sxy[i1], sxy[i1 + 2])) continue;
+      if (Math.max(sxy[i1 + 1], sxy[i1 + 3]) < Math.min(sxy[i2 + 1], sxy[i2 + 3]) || Math.max(sxy[i2 + 1], sxy[i2 + 3]) < Math.min(sxy[i1 + 1], sxy[i1 + 3])) continue;
       const s1 = segs[cell[i]], s2 = segs[cell[j]];
       if (s1[0] === s2[0] || s1[3] !== s2[3]) continue;
       if (s1[1] === s2[1] || s1[1] === s2[2] || s1[2] === s2[1] || s1[2] === s2[2]) continue;
-      const pk = Math.min(s1[0], s2[0]) + ":" + Math.max(s1[0], s2[0]);
-      if (seen.has(pk)) continue;
-      const p1 = xy(s1[1]), p2 = xy(s1[2]), p3 = xy(s2[1]), p4 = xy(s2[2]);
+      const p1 = [sxy[i1], sxy[i1 + 1]], p2 = [sxy[i1 + 2], sxy[i1 + 3]], p3 = [sxy[i2], sxy[i2 + 1]], p4 = [sxy[i2 + 2], sxy[i2 + 3]];
       const d = (p2[0] - p1[0]) * (p4[1] - p3[1]) - (p2[1] - p1[1]) * (p4[0] - p3[0]);
       if (Math.abs(d) < 1e-9) continue;
       const t = ((p3[0] - p1[0]) * (p4[1] - p3[1]) - (p3[1] - p1[1]) * (p4[0] - p3[0])) / d;
       const u = ((p3[0] - p1[0]) * (p2[1] - p1[1]) - (p3[1] - p1[1]) * (p2[0] - p1[0])) / d;
       if (t > 0.02 && t < 0.98 && u > 0.02 && u < 0.98) {
+        // ключ пары дорог собираем только для найденного пересечения: одна ошибка на пару
+        const pk = Math.min(s1[0], s2[0]) + ":" + Math.max(s1[0], s2[0]);
+        if (seen.has(pk)) continue;
         seen.add(pk);
         const [lat, lon] = toLL([p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1])]);
         errors.push({ key: "glued:" + pk, type: "glued", sev: "danger", lat, lon, ways: [s1[0], s2[0]], seg1: [s1[1], s1[2]], seg2: [s2[1], s2[2]] });

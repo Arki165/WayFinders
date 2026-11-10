@@ -143,7 +143,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   setNorms: (norms) => { saveNorms(norms); set({ norms, version: get().version + 1 }); },
   setAnalysis: (analysis) => set({ analysis, version: get().version + 1 }),
   ignore: (key) => { const s = new Set(get().ignored); s.add(key); set({ ignored: s }); get().recheck(); },
-  setHighlight: (highlight) => set({ highlight, version: get().version + 1 }),
+  // подсветка не меняет данные, поэтому номер версии не трогаем: карта перекрашивает только цвет
+  setHighlight: (highlight) => set({ highlight }),
   bump: () => set({ version: get().version + 1 }),
 }));
 

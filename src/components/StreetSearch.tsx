@@ -45,10 +45,12 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
   const input = useRef<HTMLInputElement>(null);
 
   // Справочник для поиска: улицы собраны по названию из всех участков, плюс остановки.
-  // Пересчитывается только после правки, а не на каждую букву.
+  // Пересчитывается после правки, а не на каждую букву.
+  // Пока поле не в фокусе, справочник не нужен и не пересчитывается на каждую правку.
+  const need = open || q !== "";
   const index = useMemo(() => {
     const out: Hit[] = [];
-    if (!data) return out;
+    if (!data || !need) return out;
     const streets = new Map<string, Street>();
     for (const w of data.ways.values()) {
       const name = w.tags.name;
@@ -76,7 +78,7 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
       out.push({ kind: "stop", name: n.tags.name, key: "p" + n.id, id: n.id, lat: n.lat, lon: n.lon, sub: k === "tram" ? "Остановка трамвая" : "Остановка автобуса" });
     }
     return out;
-  }, [data, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, version, need]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Подсказки по запросу: лучшие совпадения сверху, среди равных - главные и длинные улицы
   const qw = words(q);
