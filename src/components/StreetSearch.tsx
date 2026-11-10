@@ -7,10 +7,11 @@ import { ROAD_CLASSES, isDrivable } from "../model/roads";
 import { wayLengthM } from "../model/geo";
 import { poiKind } from "../model/poi";
 import Icon from "./Icon";
+import { locale, nameOf, tr, useLang } from "../i18n";
 
 type Box = [number, number, number, number]; // запад, юг, восток, север
-interface Street { kind: "street"; name: string; key: string; ids: number[]; len: number; box: Box; rank: number }
-interface Stop { kind: "stop"; name: string; key: string; id: number; lat: number; lon: number; sub: string }
+interface Street { kind: "street"; name: string; alt?: string; key: string; ids: number[]; len: number; box: Box; rank: number }
+interface Stop { kind: "stop"; name: string; alt?: string; key: string; id: number; lat: number; lon: number; sub: string }
 type Hit = Street | Stop;
 
 const MAX = 8; // сколько подсказок показывать
@@ -39,6 +40,7 @@ function score(name: string, q: string[]): number | null {
 export default function StreetSearch({ onPick }: { onPick: () => void }) {
   const data = useEditor((s) => s.data);
   const version = useEditor((s) => s.version);
+  const langId = useLang((s) => s.lang);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -56,7 +58,7 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
       const name = w.tags.name;
       if (!w.tags.highway || !name) continue;
       let st = streets.get(name);
-      if (!st) { st = { kind: "street", name, key: "s" + name, ids: [], len: 0, box: [180, 90, -180, -90], rank: 0 }; streets.set(name, st); }
+      if (!st) { st = { kind: "street", name: nameOf(w.tags), alt: name, key: "s" + name, ids: [], len: 0, box: [180, 90, -180, -90], rank: 0 }; streets.set(name, st); }
       st.ids.push(w.id);
       st.len += wayLengthM(data, w);
       if (isDrivable(w)) st.rank = Math.max(st.rank, ROAD_CLASSES[w.tags.highway]?.rank ?? 0);
@@ -75,10 +77,10 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
       const key = k + n.tags.name;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ kind: "stop", name: n.tags.name, key: "p" + n.id, id: n.id, lat: n.lat, lon: n.lon, sub: k === "tram" ? "Остановка трамвая" : "Остановка автобуса" });
+      out.push({ kind: "stop", name: nameOf(n.tags), alt: n.tags.name, key: "p" + n.id, id: n.id, lat: n.lat, lon: n.lon, sub: k === "tram" ? tr("Остановка трамвая") : tr("Остановка автобуса") });
     }
     return out;
-  }, [data, version, need]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, version, need, langId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Подсказки по запросу: лучшие совпадения сверху, среди равных - главные и длинные улицы
   const qw = words(q);
@@ -89,12 +91,13 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
       const id = Number(q.trim());
       const w = data.ways.get(id), n = data.nodes.get(id);
       const res: Hit[] = [];
-      if (w) res.push({ kind: "street", name: w.tags.name || `Дорога ${id}`, key: "w" + id, ids: [id], len: wayLengthM(data, w), box: boxOf(w.nodeIds.map((x) => data.nodes.get(x)!).filter(Boolean)), rank: 0 });
-      if (n) res.push({ kind: "stop", name: n.tags.name || `Узел ${id}`, key: "n" + id, id, lat: n.lat, lon: n.lon, sub: "Узел графа" });
+      if (w) res.push({ kind: "street", name: w.tags.name || tr("Дорога {0}", id), key: "w" + id, ids: [id], len: wayLengthM(data, w), box: boxOf(w.nodeIds.map((x) => data.nodes.get(x)!).filter(Boolean)), rank: 0 });
+      if (n) res.push({ kind: "stop", name: n.tags.name || tr("Узел {0}", id), key: "n" + id, id, lat: n.lat, lon: n.lon, sub: tr("Узел графа") });
       return res;
     }
     const scored: { h: Hit; s: number }[] = [];
-    for (const h of index) { const s = score(h.name, qw); if (s !== null) scored.push({ h, s }); }
+    // ищем и по названию на текущем языке, и по русскому (на английском можно набрать и так, и так)
+    for (const h of index) { const s = score(h.name, qw) ?? (h.alt ? score(h.alt, qw) : null); if (s !== null) scored.push({ h, s }); }
     scored.sort((a, b) => a.s - b.s || weight(b.h) - weight(a.h) || a.h.name.localeCompare(b.h.name, "ru"));
     return scored.map((x) => x.h);
   }, [q, index]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -148,15 +151,15 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
         <input
           ref={input}
           value={q}
-          placeholder="Улица или остановка"
+          placeholder={tr("Улица или остановка")}
           disabled={!data}
-          title="Поиск улиц и остановок (Ctrl+F)"
+          title={tr("Поиск улиц и остановок (Ctrl+F)")}
           onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onBlur={() => setOpen(false)}
           onKeyDown={onKeyDown}
         />
-        {q && <button className="search-clear" title="Очистить и снять подсветку" onMouseDown={(e) => e.preventDefault()} onClick={clear}><Icon name="close" size={14} /></button>}
+        {q && <button className="search-clear" title={tr("Очистить и снять подсветку")} onMouseDown={(e) => e.preventDefault()} onClick={clear}><Icon name="close" size={14} /></button>}
       </label>
       {open && qw.length > 0 && (
         // onMouseDown с preventDefault: клик по списку не уводит фокус из поля раньше времени
@@ -170,8 +173,8 @@ export default function StreetSearch({ onPick }: { onPick: () => void }) {
               </span>
             </button>
           ))}
-          {!shown.length && <div className="search-empty">Ничего не найдено. Можно ввести часть названия или номер дороги.</div>}
-          {found.length > MAX && <div className="search-more">Показаны {MAX} из {found.length}. Уточните запрос</div>}
+          {!shown.length && <div className="search-empty">{tr("Ничего не найдено. Можно ввести часть названия или номер дороги.")}</div>}
+          {found.length > MAX && <div className="search-more">{tr("Показаны")}{" "}{MAX} {" "}{tr("из")}{" "}{found.length}{tr(". Уточните запрос")}</div>}
         </div>
       )}
     </div>
@@ -183,8 +186,8 @@ const weight = (h: Hit) => (h.kind === "street" ? h.rank * 100000 + h.len : -1);
 
 function streetInfo(h: Street): string {
   const n = h.ids.length;
-  const parts = n % 10 === 1 && n % 100 !== 11 ? "участок" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "участка" : "участков";
-  const len = h.len >= 1000 ? `${(h.len / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} км` : `${Math.round(h.len)} м`;
+  const parts = n % 10 === 1 && n % 100 !== 11 ? tr("участок") : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? tr("участка") : tr("участков");
+  const len = h.len >= 1000 ? tr("{0} км", (h.len / 1000).toLocaleString(locale(), { maximumFractionDigits: 1 })) : tr("{0} м", Math.round(h.len));
   return `${n} ${parts} · ${len}`;
 }
 

@@ -1,5 +1,6 @@
 // Справочник дорог: классы, покрытия, скорости, светофоры
 import type { OsmData, OsmNode, OsmWay } from "../osm/types";
+import { nameOf, tr } from "../i18n";
 
 export interface RoadClass {
   ru: string;
@@ -9,20 +10,20 @@ export interface RoadClass {
 }
 
 export const ROAD_CLASSES: Record<string, RoadClass> = {
-  motorway: { ru: "Автомагистраль", color: [226, 110, 80], lanes: 4, rank: 12 },
-  trunk: { ru: "Скоростная дорога", color: [232, 132, 90], lanes: 4, rank: 11 },
-  primary: { ru: "Магистральная улица", color: [240, 180, 69], lanes: 4, rank: 10 },
-  secondary: { ru: "Районная улица", color: [244, 220, 131], lanes: 2, rank: 9 },
-  tertiary: { ru: "Местная улица", color: [250, 240, 190], lanes: 2, rank: 8 },
-  motorway_link: { ru: "Съезд", color: [226, 110, 80], lanes: 1, rank: 7 },
-  trunk_link: { ru: "Съезд", color: [232, 132, 90], lanes: 1, rank: 7 },
-  primary_link: { ru: "Съезд", color: [240, 180, 69], lanes: 1, rank: 7 },
-  secondary_link: { ru: "Съезд", color: [244, 220, 131], lanes: 1, rank: 7 },
-  tertiary_link: { ru: "Съезд", color: [250, 240, 190], lanes: 1, rank: 7 },
-  unclassified: { ru: "Улица без класса", color: [235, 235, 230], lanes: 2, rank: 6 },
-  residential: { ru: "Жилая улица", color: [235, 235, 230], lanes: 2, rank: 5 },
-  living_street: { ru: "Жилая зона", color: [210, 225, 210], lanes: 1, rank: 4 },
-  service: { ru: "Проезд", color: [205, 205, 200], lanes: 1, rank: 3 },
+  motorway: { get ru() { return tr("Автомагистраль"); }, color: [226, 110, 80], lanes: 4, rank: 12 },
+  trunk: { get ru() { return tr("Скоростная дорога"); }, color: [232, 132, 90], lanes: 4, rank: 11 },
+  primary: { get ru() { return tr("Магистральная улица"); }, color: [240, 180, 69], lanes: 4, rank: 10 },
+  secondary: { get ru() { return tr("Районная улица"); }, color: [244, 220, 131], lanes: 2, rank: 9 },
+  tertiary: { get ru() { return tr("Местная улица"); }, color: [250, 240, 190], lanes: 2, rank: 8 },
+  motorway_link: { get ru() { return tr("Съезд"); }, color: [226, 110, 80], lanes: 1, rank: 7 },
+  trunk_link: { get ru() { return tr("Съезд"); }, color: [232, 132, 90], lanes: 1, rank: 7 },
+  primary_link: { get ru() { return tr("Съезд"); }, color: [240, 180, 69], lanes: 1, rank: 7 },
+  secondary_link: { get ru() { return tr("Съезд"); }, color: [244, 220, 131], lanes: 1, rank: 7 },
+  tertiary_link: { get ru() { return tr("Съезд"); }, color: [250, 240, 190], lanes: 1, rank: 7 },
+  unclassified: { get ru() { return tr("Улица без класса"); }, color: [235, 235, 230], lanes: 2, rank: 6 },
+  residential: { get ru() { return tr("Жилая улица"); }, color: [235, 235, 230], lanes: 2, rank: 5 },
+  living_street: { get ru() { return tr("Жилая зона"); }, color: [210, 225, 210], lanes: 1, rank: 4 },
+  service: { get ru() { return tr("Проезд"); }, color: [205, 205, 200], lanes: 1, rank: 3 },
 };
 
 // Дороги, по которым ездят машины. Только они идут в проверки и расчеты.
@@ -36,44 +37,44 @@ export const CITY_CLASSES = ["trunk", "primary", "secondary", "tertiary", "resid
 export const CATEGORY_KEY = "wayfinders:category";
 // Классификация по расчетной интенсивности движения, прив. ед./сут (ГОСТ Р 52398, таблица 1)
 export const ROAD_CATEGORIES: { id: string; cat: string; cls: string; ru: string; flow: string; highway: string; lanes: number; speed: number }[] = [
-  { id: "IA", cat: "IА", cls: "Автомагистраль", ru: "IА, автомагистраль", flow: "свыше 14000", highway: "motorway", lanes: 4, speed: 110 },
-  { id: "IB", cat: "IБ", cls: "Скоростная дорога", ru: "IБ, скоростная дорога", flow: "свыше 14000", highway: "trunk", lanes: 4, speed: 90 },
-  { id: "IC", cat: "IВ", cls: "Дорога обычного типа", ru: "IВ, дорога обычного типа", flow: "свыше 14000", highway: "trunk", lanes: 4, speed: 90 },
-  { id: "II", cat: "II", cls: "Дорога обычного типа", ru: "II категория", flow: "свыше 6000 для федеральных, от 6000 до 14000 для других", highway: "primary", lanes: 2, speed: 90 },
-  { id: "III", cat: "III", cls: "Дорога обычного типа", ru: "III категория", flow: "свыше 2000 до 6000", highway: "secondary", lanes: 2, speed: 90 },
-  { id: "IV", cat: "IV", cls: "Дорога обычного типа", ru: "IV категория", flow: "свыше 200 до 2000", highway: "tertiary", lanes: 2, speed: 70 },
-  { id: "V", cat: "V", cls: "Дорога обычного типа", ru: "V категория", flow: "до 200", highway: "unclassified", lanes: 1, speed: 60 },
+  { id: "IA", get cat() { return tr("IА"); }, get cls() { return tr("Автомагистраль"); }, get ru() { return tr("IА, автомагистраль"); }, get flow() { return tr("свыше 14000"); }, highway: "motorway", lanes: 4, speed: 110 },
+  { id: "IB", get cat() { return tr("IБ"); }, get cls() { return tr("Скоростная дорога"); }, get ru() { return tr("IБ, скоростная дорога"); }, get flow() { return tr("свыше 14000"); }, highway: "trunk", lanes: 4, speed: 90 },
+  { id: "IC", get cat() { return tr("IВ"); }, get cls() { return tr("Дорога обычного типа"); }, get ru() { return tr("IВ, дорога обычного типа"); }, get flow() { return tr("свыше 14000"); }, highway: "trunk", lanes: 4, speed: 90 },
+  { id: "II", cat: "II", get cls() { return tr("Дорога обычного типа"); }, get ru() { return tr("II категория"); }, get flow() { return tr("свыше 6000 для федеральных, от 6000 до 14000 для других"); }, highway: "primary", lanes: 2, speed: 90 },
+  { id: "III", cat: "III", get cls() { return tr("Дорога обычного типа"); }, get ru() { return tr("III категория"); }, get flow() { return tr("свыше 2000 до 6000"); }, highway: "secondary", lanes: 2, speed: 90 },
+  { id: "IV", cat: "IV", get cls() { return tr("Дорога обычного типа"); }, get ru() { return tr("IV категория"); }, get flow() { return tr("свыше 200 до 2000"); }, highway: "tertiary", lanes: 2, speed: 70 },
+  { id: "V", cat: "V", get cls() { return tr("Дорога обычного типа"); }, get ru() { return tr("V категория"); }, get flow() { return tr("до 200"); }, highway: "unclassified", lanes: 1, speed: 60 },
 ];
 // Короткое пояснение к классу в меню выбора
 export const CLASS_HINT: Record<string, string> = {
-  trunk: "магистраль непрерывного движения",
-  primary: "магистральная улица общегородского значения",
-  secondary: "магистральная улица районного значения",
-  tertiary: "улица местного значения",
-  residential: "улица в жилой застройке",
-  living_street: "пешеходы главнее, 20 км/ч",
-  service: "проезд к домам, парковкам",
-  primary_link: "съезд, поворотная связка",
-  unclassified: "улица или дорога без класса",
+  get trunk() { return tr("магистраль непрерывного движения"); },
+  get primary() { return tr("магистральная улица общегородского значения"); },
+  get secondary() { return tr("магистральная улица районного значения"); },
+  get tertiary() { return tr("улица местного значения"); },
+  get residential() { return tr("улица в жилой застройке"); },
+  get living_street() { return tr("пешеходы главнее, 20 км/ч"); },
+  get service() { return tr("проезд к домам, парковкам"); },
+  get primary_link() { return tr("съезд, поворотная связка"); },
+  get unclassified() { return tr("улица или дорога без класса"); },
 };
 
 // Покрытие дороги и коэффициент снижения скорости (условные значения, уточняют транспортники).
 // По правилам OSM щебень записывается как gravel, гравий (галька) как pebblestone.
 export const SURFACES: Record<string, { ru: string; k: number }> = {
-  asphalt: { ru: "Асфальт", k: 1.0 },
-  concrete: { ru: "Бетон", k: 1.0 },
-  paving_stones: { ru: "Плитка", k: 0.8 },
-  sett: { ru: "Брусчатка", k: 0.7 },
-  gravel: { ru: "Щебень", k: 0.6 },
-  compacted: { ru: "Укатанный щебень", k: 0.75 },
-  fine_gravel: { ru: "Мелкий гравий", k: 0.65 },
-  pebblestone: { ru: "Гравий", k: 0.6 },
-  ground: { ru: "Грунт", k: 0.5 },
-  sand: { ru: "Песок", k: 0.4 },
+  asphalt: { get ru() { return tr("Асфальт"); }, k: 1.0 },
+  concrete: { get ru() { return tr("Бетон"); }, k: 1.0 },
+  paving_stones: { get ru() { return tr("Плитка"); }, k: 0.8 },
+  sett: { get ru() { return tr("Брусчатка"); }, k: 0.7 },
+  gravel: { get ru() { return tr("Щебень"); }, k: 0.6 },
+  compacted: { get ru() { return tr("Укатанный щебень"); }, k: 0.75 },
+  fine_gravel: { get ru() { return tr("Мелкий гравий"); }, k: 0.65 },
+  pebblestone: { get ru() { return tr("Гравий"); }, k: 0.6 },
+  ground: { get ru() { return tr("Грунт"); }, k: 0.5 },
+  sand: { get ru() { return tr("Песок"); }, k: 0.4 },
 };
 // Старые значения из файлов OSM: в меню их нет, но читаются как похожие покрытия
 export const SURFACE_ALIAS: Record<string, string> = { dirt: "ground", unpaved: "ground", earth: "ground", mud: "ground", paved: "asphalt", "concrete:plates": "concrete" };
-export const SURFACE_OTHER: Record<string, string> = { dirt: "Грунтовка", unpaved: "Без покрытия", paved: "С покрытием", wood: "Дерево", grass: "Трава" };
+export const SURFACE_OTHER: Record<string, string> = { get dirt() { return tr("Грунтовка"); }, get unpaved() { return tr("Без покрытия"); }, get paved() { return tr("С покрытием"); }, get wood() { return tr("Дерево"); }, get grass() { return tr("Трава"); } };
 export const surfaceName = (v: string) => SURFACES[v]?.ru ?? SURFACE_OTHER[v] ?? v;
 
 // Скорость по умолчанию, если maxspeed не задан (городские нормы РФ)
@@ -122,7 +123,7 @@ export const phaseKey = (k: "green" | "yellow" | "red", side: string) => `${SIGN
 const SIDES = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const SIDES_RU = ["с севера", "с северо-востока", "с востока", "с юго-востока", "с юга", "с юго-запада", "с запада", "с северо-запада"];
 export const sideOf = (az: number) => SIDES[Math.round((((az % 360) + 360) % 360) / 45) % 8];
-export const sideRu = (side: string) => SIDES_RU[SIDES.indexOf(side)] ?? side;
+export const sideRu = (side: string) => tr(SIDES_RU[SIDES.indexOf(side)]) ?? side;
 
 // Азимут от точки a к точке b в градусах
 export function azimuth(a: OsmNode, b: OsmNode): number {
@@ -156,10 +157,10 @@ export function nodeArms(data: OsmData, nodeId: number): Arm[] {
 }
 
 // Рельсовые пути: трамвай и железная дорога
-export const TRACKS: Record<string, string> = { tram: "Трамвайные пути", rail: "Железная дорога", light_rail: "Легкое метро", subway: "Метро" };
+export const TRACKS: Record<string, string> = { get tram() { return tr("Трамвайные пути"); }, get rail() { return tr("Железная дорога"); }, get light_rail() { return tr("Легкое метро"); }, get subway() { return tr("Метро"); } };
 export const isTrack = (w: OsmWay) => !!w.tags.railway && w.tags.railway in TRACKS;
 
 export function wayName(w: OsmWay | undefined): string {
-  if (!w) return "дорога";
-  return w.tags.name || roadClass(w).ru;
+  if (!w) return tr("дорога");
+  return nameOf(w.tags) || roadClass(w).ru;
 }

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ICONS } from "./mapIcons";
 import Icon from "./Icon";
+import { tr } from "../i18n";
 
 export type Level = "city" | "metro";
 export type LayerKey = "roads" | "lanes" | "signals" | "crossings" | "stops" | "metro" | "rail" | "paths" | "errors";
@@ -11,15 +12,15 @@ export const DEFAULT_SHOW: LayerShow = { roads: true, lanes: true, signals: true
 
 // Подписи и значок-образец для каждого слоя
 const ROWS: { key: LayerKey; name: string; icon?: string; color?: string }[] = [
-  { key: "roads", name: "Дороги", color: "#f0b445" },
-  { key: "lanes", name: "Полосы и разметка", color: "#6b6f6a" },
-  { key: "signals", name: "Светофоры", icon: ICONS.signal },
-  { key: "crossings", name: "Пешеходные переходы", icon: ICONS.crossing },
-  { key: "stops", name: "Остановки", icon: ICONS.bus },
-  { key: "metro", name: "Метро", icon: ICONS.metro },
-  { key: "rail", name: "Ж/д и трамвай", color: "#82649f" },
-  { key: "paths", name: "Тротуары и дорожки", color: "#968273" },
-  { key: "errors", name: "Ошибки графа", color: "#d8402f" },
+  { key: "roads", get name() { return tr("Дороги"); }, color: "#f0b445" },
+  { key: "lanes", get name() { return tr("Полосы и разметка"); }, color: "#6b6f6a" },
+  { key: "signals", get name() { return tr("Светофоры"); }, icon: ICONS.signal },
+  { key: "crossings", get name() { return tr("Пешеходные переходы"); }, icon: ICONS.crossing },
+  { key: "stops", get name() { return tr("Остановки"); }, icon: ICONS.bus },
+  { key: "metro", get name() { return tr("Метро"); }, icon: ICONS.metro },
+  { key: "rail", get name() { return tr("Ж/д и трамвай"); }, color: "#82649f" },
+  { key: "paths", get name() { return tr("Тротуары и дорожки"); }, color: "#968273" },
+  { key: "errors", get name() { return tr("Ошибки графа"); }, color: "#d8402f" },
 ];
 
 // Сохраняем выбор только у себя на компьютере, чтобы он не сбрасывался при перезапуске
@@ -43,16 +44,16 @@ export default function LayersPanel({ level, show, onLevel, onShow, metroCount }
   const hidden = ROWS.filter((r) => !show[r.key]).length;
   return (
     <div className={"layers" + (open ? " open" : "")}>
-      <button className="layers-head" onClick={() => setOpen(!open)} title="Уровни карты и слои: что показывать">
-        <Icon name="layers" size={14} />Слои{level === "metro" ? ": метро" : ""}{hidden ? ` (скрыто ${hidden})` : ""} <Icon name={open ? "chevronUp" : "chevronDown"} size={13} className="muted" />
+      <button className="layers-head" onClick={() => setOpen(!open)} title={tr("Уровни карты и слои: что показывать")}>
+        <Icon name="layers" size={14} />{tr("Слои")}{level === "metro" ? tr(": метро") : ""}{hidden ? tr(" (скрыто {0})", hidden) : ""} <Icon name={open ? "chevronUp" : "chevronDown"} size={13} className="muted" />
       </button>
       {open && (
         <div className="layers-body">
-          <div className="seg layers-level" title="Уровень карты">
-            <button className={level === "city" ? "on" : ""} onClick={() => onLevel("city")}>Город</button>
-            <button className={level === "metro" ? "on" : ""} onClick={() => onLevel("metro")}>Метро{metroCount ? "" : " (нет)"}</button>
+          <div className="seg layers-level" title={tr("Уровень карты")}>
+            <button className={level === "city" ? "on" : ""} onClick={() => onLevel("city")}>{tr("Город")}</button>
+            <button className={level === "metro" ? "on" : ""} onClick={() => onLevel("metro")}>{tr("Метро")}{metroCount ? "" : tr(" (нет)")}</button>
           </div>
-          {level === "metro" && <p className="hint">Метро ярко, город бледно. {metroCount ? `Линий метро: ${metroCount}.` : "В этом файле метро нет."}</p>}
+          {level === "metro" && <p className="hint">{tr("Метро ярко, город бледно.")}{" "}{metroCount ? tr("Линий метро: {0}.", metroCount) : tr("В этом файле метро нет.")}</p>}
           {ROWS.map((r) => (
             <label key={r.key} className="layers-row">
               <input type="checkbox" checked={show[r.key]} onChange={() => onShow({ ...show, [r.key]: !show[r.key] })} />
@@ -61,8 +62,8 @@ export default function LayersPanel({ level, show, onLevel, onShow, metroCount }
             </label>
           ))}
           <div className="chips">
-            <button onClick={() => onShow({ ...DEFAULT_SHOW })}>Показать все</button>
-            <button onClick={() => onShow({ ...DEFAULT_SHOW, lanes: false, paths: false, rail: false, errors: false })} title="Только дороги и объекты для движения">Только дороги</button>
+            <button onClick={() => onShow({ ...DEFAULT_SHOW })}>{tr("Показать все")}</button>
+            <button onClick={() => onShow({ ...DEFAULT_SHOW, lanes: false, paths: false, rail: false, errors: false })} title={tr("Только дороги и объекты для движения")}>{tr("Только дороги")}</button>
           </div>
         </div>
       )}

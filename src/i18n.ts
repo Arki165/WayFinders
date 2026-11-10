@@ -1,33 +1,46 @@
-// Язык интерфейса: русский или английский.
+// Язык интерфейса.
 // Все тексты в коде написаны по-русски и проходят через tr(): на русском tr возвращает текст как есть,
-// на английском ищет перевод в словаре EN (файл i18n.en.ts). Числа и названия подставляются в {0}, {1}...
+// на другом языке ищет перевод в его словаре. Числа и названия подставляются в {0}, {1}...
+// Новый язык: файл словаря (как i18n.en.ts) и одна строка в LANGS.
 import { create } from "zustand";
 import { EN } from "./i18n.en";
 
-export type Lang = "ru" | "en";
+export interface LangInfo {
+  id: string; // код языка
+  name: string; // название на самом языке, так его найдет тот, кто русского не знает
+  locale: string; // формат чисел и дат
+  dict: Record<string, string> | null; // переводы; у русского нет, тексты в коде уже русские
+  latin: boolean; // названия улиц писать латиницей
+}
+export const LANGS: LangInfo[] = [
+  { id: "ru", name: "Русский", locale: "ru-RU", dict: null, latin: false },
+  { id: "en", name: "English", locale: "en-US", dict: EN, latin: true },
+];
+export type Lang = string;
+const info = (id: string) => LANGS.find((l) => l.id === id) ?? LANGS[0];
 
 function loadLang(): Lang {
-  try { return localStorage.getItem("lang") === "en" ? "en" : "ru"; } catch { return "ru"; }
+  try { return info(localStorage.getItem("lang") ?? "ru").id; } catch { return "ru"; }
 }
 
 // Текущий язык хранится и в переменной (для tr), и в маленьком хранилище (чтобы окно перерисовалось)
-let current: Lang = loadLang();
+let current: LangInfo = info(loadLang());
 export const useLang = create<{ lang: Lang; setLang: (l: Lang) => void }>((set) => ({
-  lang: current,
+  lang: current.id,
   setLang: (lang) => {
-    current = lang;
-    try { localStorage.setItem("lang", lang); } catch { /* хранилище недоступно */ }
-    document.documentElement.lang = lang;
-    set({ lang });
+    current = info(lang);
+    try { localStorage.setItem("lang", current.id); } catch { /* хранилище недоступно */ }
+    document.documentElement.lang = current.id;
+    set({ lang: current.id });
   },
 }));
-document.documentElement.lang = current;
+document.documentElement.lang = current.id;
 
-export const lang = () => current;
+export const lang = () => current.id;
 
 // Перевод строки. tr("Дорог: {0}", 861) -> "Дорог: 861" или "Roads: 861"
-export function tr(ru: string, ...args: (string | number)[]): string {
-  let s = current === "en" ? EN[ru] ?? missing(ru) : ru;
+export function tr(ru: string, ...args: unknown[]): string {
+  let s = current.dict ? current.dict[ru] ?? missing(ru) : ru;
   args.forEach((a, i) => { s = s.split(`{${i}}`).join(String(a)); });
   return s;
 }
@@ -35,12 +48,12 @@ export function tr(ru: string, ...args: (string | number)[]): string {
 // Строки без перевода в режиме разработки пишем в консоль один раз: так их легко найти и добавить
 const reported = new Set<string>();
 function missing(ru: string): string {
-  if (import.meta.env.DEV && !reported.has(ru)) { reported.add(ru); console.warn("[перевод] нет английского:", ru); }
+  if (import.meta.env.DEV && !reported.has(ru)) { reported.add(ru); console.warn(`[перевод ${current.id}] нет перевода:`, ru); }
   return ru;
 }
 
 // Числа: на русском «1 234,5», на английском «1,234.5»
-export const locale = () => (current === "en" ? "en-US" : "ru-RU");
+export const locale = () => current.locale;
 
 // ---------- названия улиц и остановок латиницей ----------
 // Буквы по ГОСТ Р 52290-2004 (так пишут на дорожных указателях в России), мягкий и твердый знак не пишем
@@ -85,9 +98,15 @@ export function streetEn(name: string): string {
   return type ? `${body} ${type}`.trim() : body;
 }
 
+// Любой русский текст из данных (название маршрута, остановки) на языке с латиницей пишем латиницей
+export const toLatin = (s: string) => (current.latin ? translit(s) : s);
+
+// Какой тег названия правится в панели: на русском name, на английском name:en (так принято в OSM)
+export const nameKey = () => (current.latin ? "name:" + current.id : "name");
+
 // Название из тегов OSM на текущем языке: name:en, иначе латиницей
 export function nameOf(tags: Record<string, string>): string {
   const ru = tags.name ?? "";
-  if (current !== "en") return ru;
-  return tags["name:en"] || (ru ? streetEn(ru) : "");
+  if (!current.latin) return ru;
+  return tags["name:" + current.id] || (ru ? streetEn(ru) : "");
 }

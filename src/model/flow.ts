@@ -4,17 +4,18 @@
 // Nmax = Vсвоб × qзат / 4 = P, отсюда qзат = 4P / Vсвоб.
 // Задержка от загрузки - формула BPR (Бюро дорог США): T = Tсвоб × (1 + 0,15 Z⁴).
 import type { CalcResult } from "./calc";
+import { tr } from "../i18n";
 
 export type FlowKind = "Nq" | "Vq" | "DZ" | "VN" | "Dq" | "Tt";
 export const FLOW_TITLES: Record<FlowKind, string> = {
-  Nq: "Основная диаграмма: интенсивность от плотности N(q)",
-  Vq: "Скорость от плотности V ср(q)",
-  DZ: "Задержка от загрузки D(Z)",
-  VN: "Скорость от интенсивности V ср(N)",
-  Dq: "Задержка от плотности D(q)",
-  Tt: "Задержка в течение суток T зад(t)",
+  get Nq() { return tr("Основная диаграмма: интенсивность от плотности N(q)"); },
+  get Vq() { return tr("Скорость от плотности V ср(q)"); },
+  get DZ() { return tr("Задержка от загрузки D(Z)"); },
+  get VN() { return tr("Скорость от интенсивности V ср(N)"); },
+  get Dq() { return tr("Задержка от плотности D(q)"); },
+  get Tt() { return tr("Задержка в течение суток T зад(t)"); },
 };
-export const FLOW_SHORT: Record<FlowKind, string> = { Nq: "N(q)", Vq: "V(q)", DZ: "D(Z)", VN: "V(N)", Dq: "D(q)", Tt: "T зад(t)" };
+export const FLOW_SHORT: Record<FlowKind, string> = { Nq: "N(q)", Vq: "V(q)", DZ: "D(Z)", VN: "V(N)", Dq: "D(q)", get Tt() { return tr("T зад(t)"); } };
 export const FLOW_AXES: Record<FlowKind, [string, string]> = {
   Nq: ["Плотность q, авт/км", "Интенсивность N, авт/ч"],
   Vq: ["Плотность q, авт/км", "Средняя скорость V ср, км/ч"],

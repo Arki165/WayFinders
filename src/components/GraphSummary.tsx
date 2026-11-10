@@ -7,23 +7,25 @@ import { ROAD_CLASSES, drivableNodeSet, isDrivable, isRoadSignal, wayName } from
 import { wayLengthM } from "../model/geo";
 import { calcWay, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { poiKind } from "../model/poi";
+import { locale, tr, useLang } from "../i18n";
 
 // Классы дорог собраны в понятные группы, цвет берется у главного класса группы
 const GROUPS: { ru: string; classes: string[] }[] = [
-  { ru: "Магистрали", classes: ["motorway", "trunk", "primary"] },
-  { ru: "Районные", classes: ["secondary"] },
-  { ru: "Местные", classes: ["tertiary", "unclassified"] },
-  { ru: "Жилые и проезды", classes: ["residential", "living_street", "service"] },
-  { ru: "Съезды", classes: ["motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"] },
+  { get ru() { return tr("Магистрали"); }, classes: ["motorway", "trunk", "primary"] },
+  { get ru() { return tr("Районные"); }, classes: ["secondary"] },
+  { get ru() { return tr("Местные"); }, classes: ["tertiary", "unclassified"] },
+  { get ru() { return tr("Жилые и проезды"); }, classes: ["residential", "living_street", "service"] },
+  { get ru() { return tr("Съезды"); }, classes: ["motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"] },
 ];
 
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-const km = (m: number) => (m / 1000).toLocaleString("ru-RU", { maximumFractionDigits: m < 10000 ? 1 : 0 });
+const km = (m: number) => (m / 1000).toLocaleString(locale(), { maximumFractionDigits: m < 10000 ? 1 : 0 });
 
 export default function GraphSummary() {
   const data = useEditor((s) => s.data);
   const version = useEditor((s) => s.version);
   const norms = useEditor((s) => s.norms);
+  const langId = useLang((s) => s.lang);
 
   // считаем один раз на каждую правку, а не на каждую перерисовку
   const sum = useMemo(() => {
@@ -58,7 +60,7 @@ export default function GraphSummary() {
     }
     measured.sort((a, b) => b.z - a.z);
     return { roads, total, byGroup, crossroads, signals, stops, top: measured.slice(0, 3), measured: measured.length };
-  }, [data, version, norms]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, version, norms, langId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!sum) return null;
   const max = Math.max(...sum.byGroup, 1);
@@ -75,16 +77,16 @@ export default function GraphSummary() {
 
   return (
     <div className="summary">
-      <h3>Сводка по графу</h3>
+      <h3>{tr("Сводка по графу")}</h3>
       <div className="sum-stats">
-        <div><b>{km(sum.total)}</b><span>км дорог</span></div>
-        <div><b>{sum.crossroads.toLocaleString("ru-RU")}</b><span>перекрестков</span></div>
-        <div><b>{sum.signals.toLocaleString("ru-RU")}</b><span>светофоров</span></div>
-        <div><b>{sum.stops.toLocaleString("ru-RU")}</b><span>остановок</span></div>
+        <div><b>{km(sum.total)}</b><span>{tr("км дорог")}</span></div>
+        <div><b>{sum.crossroads.toLocaleString(locale())}</b><span>{tr("перекрестков")}</span></div>
+        <div><b>{sum.signals.toLocaleString(locale())}</b><span>{tr("светофоров")}</span></div>
+        <div><b>{sum.stops.toLocaleString(locale())}</b><span>{tr("остановок")}</span></div>
       </div>
       <div className="sum-bars">
         {GROUPS.map((g, i) => sum.byGroup[i] > 0 && (
-          <div key={g.ru} className="sum-bar" title={`${g.ru}: ${km(sum.byGroup[i])} км`}>
+          <div key={g.ru} className="sum-bar" title={tr("{0}: {1} км", g.ru, km(sum.byGroup[i]))}>
             <i style={{ background: `rgb(${ROAD_CLASSES[g.classes[0]].color.join(",")})` }} />
             <span>{g.ru}</span>
             <div className="sum-track"><div style={{ width: `${(sum.byGroup[i] / max) * 100}%` }} /></div>
@@ -92,20 +94,20 @@ export default function GraphSummary() {
           </div>
         ))}
       </div>
-      <h3>Самые загруженные</h3>
+      <h3>{tr("Самые загруженные")}</h3>
       {sum.top.length ? (
         <div className="sum-top">
           {sum.top.map((t) => (
-            <button key={t.id} onClick={() => goTo(t.id)} title="Показать на карте">
-              <span className="zpill" style={{ background: `rgb(${Z_COLORS[zLevel(t.z, norms)].join(",")})` }}>{t.z.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</span>
+            <button key={t.id} onClick={() => goTo(t.id)} title={tr("Показать на карте")}>
+              <span className="zpill" style={{ background: `rgb(${Z_COLORS[zLevel(t.z, norms)].join(",")})` }}>{t.z.toLocaleString(locale(), { maximumFractionDigits: 2 })}</span>
               <span className="sum-name">{t.name}</span>
-              <small>{cap(Z_TEXT[zLevel(t.z, norms)])}</small>
+              <small>{cap(tr(Z_TEXT[zLevel(t.z, norms)]))}</small>
             </button>
           ))}
-          {sum.measured > 3 && <p className="hint">Всего участков с замерами: {sum.measured}</p>}
+          {sum.measured > 3 && <p className="hint">{tr("Всего участков с замерами:")}{" "}{sum.measured}</p>}
         </div>
       ) : (
-        <p className="hint">Замеров пока нет. Введите N в таблице «Расчеты и графики», и здесь появятся участки с самой высокой загрузкой.</p>
+        <p className="hint">{tr("Замеров пока нет. Введите N в таблице «Расчеты и графики», и здесь появятся участки с самой высокой загрузкой.")}</p>
       )}
     </div>
   );

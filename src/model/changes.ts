@@ -2,6 +2,7 @@
 // Нужно, чтобы показать правки прямо на карте.
 import type { OsmData, OsmWay } from "../osm/types";
 import { isDrivable } from "./roads";
+import { tr } from "../i18n";
 
 export type ChangeKind = "added" | "changed" | "deleted";
 
@@ -65,7 +66,7 @@ export const CHANGE_COLORS: Record<ChangeKind, [number, number, number, number]>
 };
 
 export const CHANGE_TEXT: Record<ChangeKind, string> = {
-  added: "новая",
-  changed: "изменена",
-  deleted: "удалена",
+  get added() { return tr("новая"); },
+  get changed() { return tr("изменена"); },
+  get deleted() { return tr("удалена"); },
 };

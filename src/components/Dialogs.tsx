@@ -5,6 +5,7 @@ import { writeOsm } from "../osm/write";
 import type { OsmData } from "../osm/types";
 import { saveOsmText } from "../model/exporting";
 import Icon from "./Icon";
+import { tr } from "../i18n";
 
 // ---------- загрузка района из OpenStreetMap (Overpass API) ----------
 // Серверы Overpass по порядку: если первый перегружен или недоступен, пробуем следующий.
@@ -16,7 +17,7 @@ const OVERPASS = [
 
 // Загрузку отменили кнопкой «Отмена»: это не ошибка, сообщение не показываем
 class Cancelled extends Error {}
-const stopIfCancelled = (signal: AbortSignal) => { if (signal.aborted) throw new Cancelled("Загрузка отменена"); };
+const stopIfCancelled = (signal: AbortSignal) => { if (signal.aborted) throw new Cancelled(tr("Загрузка отменена")); };
 
 // Запрос к Overpass. Подпись программы (User-Agent) ставит electron/main.cjs:
 // с подписью браузера overpass-api.de отвечает 406.
@@ -28,7 +29,7 @@ const RETRY_WAIT_S = [15, 45];
 const pause = (sec: number, signal: AbortSignal) =>
   new Promise<void>((ok, fail) => {
     const t = setTimeout(ok, sec * 1000);
-    signal.addEventListener("abort", () => { clearTimeout(t); fail(new Cancelled("Загрузка отменена")); }, { once: true });
+    signal.addEventListener("abort", () => { clearTimeout(t); fail(new Cancelled(tr("Загрузка отменена"))); }, { once: true });
   });
 
 // onWait - показать человеку, что ждем сервер (иначе кажется, что программа зависла)
@@ -37,9 +38,9 @@ async function overpass(q: string, signal: AbortSignal, onWait?: (msg: string) =
     const fails = await overpassRound(q, signal);
     if (typeof fails === "string") return fails; // это ответ сервера
     const why = fails.join(", ");
-    if (why.includes("406")) throw new Error(`Серверы Overpass отклонили запрос (${why}). Запускайте загрузку из программы Wayfinder, а не из браузера.`);
-    if (round >= RETRY_WAIT_S.length) throw new Error(`Серверы Overpass сейчас перегружены (${why}). Попробуйте через минуту или загрузите меньшую область.`);
-    onWait?.(`Серверы Overpass перегружены (${why}), жду ${RETRY_WAIT_S[round]} с и пробую снова (попытка ${round + 2} из ${RETRY_WAIT_S.length + 1})...`);
+    if (why.includes("406")) throw new Error(tr("Серверы Overpass отклонили запрос ({0}). Запускайте загрузку из программы Wayfinder, а не из браузера.", why));
+    if (round >= RETRY_WAIT_S.length) throw new Error(tr("Серверы Overpass сейчас перегружены ({0}). Попробуйте через минуту или загрузите меньшую область.", why));
+    onWait?.(tr("Серверы Overpass перегружены ({0}), жду {1} с и пробую снова (попытка {2} из {3})...", why, RETRY_WAIT_S[round], round + 2, RETRY_WAIT_S.length + 1));
     await pause(RETRY_WAIT_S[round], signal);
   }
 }
@@ -60,12 +61,12 @@ async function overpassRound(q: string, signal: AbortSignal): Promise<string | s
       });
       if (res.ok) return await res.text();
       // 400 - ошибка в самом запросе, другой сервер ответит так же
-      if (res.status === 400) throw new Error("Сервер Overpass не понял запрос (400)");
+      if (res.status === 400) throw new Error(tr("Сервер Overpass не понял запрос (400)"));
       fails.push(`${host}: ${res.status}`);
     } catch (e) {
       stopIfCancelled(signal);
       if (e instanceof Error && e.message.includes("(400)")) throw e;
-      fails.push(`${host}: нет ответа`);
+      fails.push(tr("{0}: нет ответа", host));
     }
   }
   return fails;
@@ -127,11 +128,11 @@ async function findCities(input: string, signal: AbortSignal, onWait?: (msg: str
       areaId: area.id, area: area.tags.name,
     });
   }
-  if (!out.length) throw new Error(`Город «${input}» не найден в OpenStreetMap. Проверьте написание, например «Ангарск» или «Moscow».`);
+  if (!out.length) throw new Error(tr("Город «{0}» не найден в OpenStreetMap. Проверьте написание, например «Ангарск» или «Moscow».", input));
   return out.sort((a, b) => b.population - a.population);
 }
 
-const fmtPop = (p: number) => (p >= 1e6 ? `${(p / 1e6).toFixed(1).replace(".", ",")} млн жителей` : p >= 1e3 ? `${Math.round(p / 1e3)} тыс. жителей` : "население не указано");
+const fmtPop = (p: number) => (p >= 1e6 ? tr("{0} млн жителей", (p / 1e6).toFixed(1).replace(".", ",")) : p >= 1e3 ? tr("{0} тыс. жителей", Math.round(p / 1e3)) : tr("население не указано"));
 
 // Город крупнее этого скачиваем кусками: целиком Москву (больше 400 МБ одних дорог) сервер не отдает
 const BIG_CITY = 1_500_000;
@@ -144,9 +145,9 @@ function checkComplete(xml: string) {
   const m = xml.match(/<remark>([\s\S]*?)<\/remark>/);
   if (!m) return;
   const msg = m[1].trim();
-  if (/timed out|timeout/i.test(msg)) throw new Error("Сервер Overpass не успел отдать данные целиком (не хватило времени). Снимите галочку «Вместе со зданиями» или загрузите видимую область.");
-  if (/out of memory|memory/i.test(msg)) throw new Error("Слишком много данных для сервера Overpass (не хватило памяти). Снимите галочку «Вместе со зданиями» или загрузите видимую область.");
-  throw new Error("Сервер Overpass вернул неполные данные: " + msg.slice(0, 200));
+  if (/timed out|timeout/i.test(msg)) throw new Error(tr("Сервер Overpass не успел отдать данные целиком (не хватило времени). Снимите галочку «Вместе со зданиями» или загрузите видимую область."));
+  if (/out of memory|memory/i.test(msg)) throw new Error(tr("Слишком много данных для сервера Overpass (не хватило памяти). Снимите галочку «Вместе со зданиями» или загрузите видимую область."));
+  throw new Error(tr("Сервер Overpass вернул неполные данные: ") + msg.slice(0, 200));
 }
 
 // Добавить кусок в общий результат. Дорога на стыке двух кусков приходит в обоих целиком,
@@ -187,13 +188,13 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
     // id области = 3600000000 + id отношения; область из линии (2400000000+) пропускаем.
     const relId = c.areaId - 3600000000;
     const boundary = relId > 0 ? `rel(${relId});` : "";
-    const what = `дороги${withBuildings ? " и здания" : ""}`;
+    const what = tr("дороги{0}", withBuildings ? tr(" и здания") : "");
     let dl = 0, parse = 0, mb = 0;
 
     // рамки кусков: для крупного города режем рамку его границы на квадраты
     let tiles: string[] = [""];
     if (c.population > BIG_CITY && relId > 0) {
-      setStage(`${c.city}: крупный город, узнаю размеры, чтобы скачать кусками...`);
+      setStage(tr("{0}: крупный город, узнаю размеры, чтобы скачать кусками...", c.city));
       const t = performance.now();
       const bb = JSON.parse(await overpass(`[out:json][timeout:60];rel(${relId});out bb;`, signal, setStage)).elements[0]?.bounds;
       dl += performance.now() - t;
@@ -210,8 +211,8 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
     const data: OsmData = { nodes: new Map(), ways: new Map(), relations: new Map(), bounds: null, header: {} };
     for (let i = 0; i < tiles.length; i++) {
       stopIfCancelled(signal);
-      const part = tiles.length > 1 ? `Кусок ${i + 1} из ${tiles.length}: ` : "";
-      setStage(`${part}${c.city}, граница «${c.area}». Скачиваю ${what}...${mb ? ` Уже ${mb.toFixed(0)} МБ.` : ""}`);
+      const part = tiles.length > 1 ? tr("Кусок {0} из {1}: ", i + 1, tiles.length) : "";
+      setStage(tr("{0}{1}, граница «{2}». Скачиваю {3}...{4}", part, c.city, c.area, what, mb ? tr(" Уже {0} МБ.", mb.toFixed(0)) : ""));
       // граница скачивается один раз, с первым куском; в куске - только то, что внутри и границы, и квадрата
       const q = body(`[out:xml][timeout:600];area(${c.areaId})->.a;`, i === 0 ? boundary : "").replace(/\(A\)/g, `(area.a)${tiles[i]}`);
       let t = performance.now();
@@ -219,7 +220,7 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
       dl += performance.now() - t;
       checkComplete(text);
       mb += text.length / 1e6;
-      setStage(`${part}получено ${mb.toFixed(0)} МБ, разбираю...`);
+      setStage(tr("{0}получено {1} МБ, разбираю...", part, mb.toFixed(0)));
       await new Promise((r) => setTimeout(r, 0)); // дать окну показать надпись перед долгим разбором
       t = performance.now();
       const p = parseOsm(text);
@@ -238,14 +239,14 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
     const cityName = city.trim().replace(/["\\]/g, "");
     const b = getBounds();
     if (kind === "view") {
-      if (!b) return setErr("Карта еще не готова");
+      if (!b) return setErr(tr("Карта еще не готова"));
       const [s, w, n, e] = b;
-      if ((n - s) * (e - w) > 0.02) return setErr("Область слишком большая, приблизьте карту или загрузите город по названию");
-    } else if (!cityName && !chosen) return setErr("Введите название города");
+      if ((n - s) * (e - w) > 0.02) return setErr(tr("Область слишком большая, приблизьте карту или загрузите город по названию"));
+    } else if (!cityName && !chosen) return setErr(tr("Введите название города"));
     const ctl = new AbortController();
     abort.current = ctl;
     setBusy(true);
-    setStage(kind === "view" ? "Скачиваю видимую область..." : "");
+    setStage(kind === "view" ? tr("Скачиваю видимую область...") : "");
     try {
       const t0 = performance.now();
       let res: Downloaded;
@@ -262,7 +263,7 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
       } else {
         let c = chosen;
         if (!c) {
-          setStage(`Ищу город «${cityName}»...`);
+          setStage(tr("Ищу город «{0}»...", cityName));
           const found = await findCities(cityName, ctl.signal, setStage);
           // несколько городов с таким названием: пусть человек выберет нужный
           if (found.length > 1) { setChoices(found); return; }
@@ -273,17 +274,17 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
       }
       stopIfCancelled(ctl.signal);
       const data = res.data;
-      if (!data.ways.size) throw new Error("В этой области нет дорог");
-      setStage(`Открываю ${data.ways.size} линий и проверяю граф...`);
+      if (!data.ways.size) throw new Error(tr("В этой области нет дорог"));
+      setStage(tr("Открываю {0} линий и проверяю граф...", data.ways.size));
       await new Promise((r) => setTimeout(r, 0));
       const t3 = performance.now();
       const merged = merge && hasMap ? mergeMap(data, name) : (load(data, name, null), null);
       const open = performance.now() - t3;
       // время по частям: пригодится, чтобы объяснить жюри, где тратятся секунды
       const sec = (ms: number) => (ms / 1000).toFixed(1).replace(".", ",");
-      const times = `за ${sec(performance.now() - t0)} с (скачивание ${sec(res.dl)} с, ${res.mb.toFixed(0)} МБ; разбор ${sec(res.parse)} с; открытие и проверка ${sec(open)} с)`;
-      if (merged) useEditor.getState().toast(`Район присоединен: ${merged.ways} новых линий ${times}. На стыке сшито дорог: ${merged.stitched}`);
-      else useEditor.getState().toast(`Загружено: ${data.ways.size} линий, ${data.nodes.size} узлов ${times}`);
+      const times = tr("за {0} с (скачивание {1} с, {2} МБ; разбор {3} с; открытие и проверка {4} с)", sec(performance.now() - t0), sec(res.dl), res.mb.toFixed(0), sec(res.parse), sec(open));
+      if (merged) useEditor.getState().toast(tr("Район присоединен: {0} новых линий {1}. На стыке сшито дорог: {2}", merged.ways, times, merged.stitched));
+      else useEditor.getState().toast(tr("Загружено: {0} линий, {1} узлов {2}", data.ways.size, data.nodes.size, times));
       onClose();
     } catch (e) {
       if (!(e instanceof Cancelled)) setErr(e instanceof Error ? e.message : String(e));
@@ -296,31 +297,31 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div className="dialog">
-        <h2>Загрузить район из OpenStreetMap</h2>
-        <p className="hint">Редактор работает с любым городом: данные скачиваются из OpenStreetMap через Overpass API в том же формате .osm.</p>
-        <button className="primary" disabled={busy} onClick={() => run("view")}>Скачать видимую область карты</button>
+        <h2>{tr("Загрузить район из OpenStreetMap")}</h2>
+        <p className="hint">{tr("Редактор работает с любым городом: данные скачиваются из OpenStreetMap через Overpass API в том же формате .osm.")}</p>
+        <button className="primary" disabled={busy} onClick={() => run("view")}>{tr("Скачать видимую область карты")}</button>
         <div className="row">
-          <input placeholder="Название города, например Ангарск" value={city} onChange={(e) => { setCity(e.target.value); setChoices([]); }} onKeyDown={(e) => e.key === "Enter" && !busy && run("city")} disabled={busy} />
-          <button disabled={busy} onClick={() => run("city")}>Скачать город</button>
+          <input placeholder={tr("Название города, например Ангарск")} value={city} onChange={(e) => { setCity(e.target.value); setChoices([]); }} onKeyDown={(e) => e.key === "Enter" && !busy && run("city")} disabled={busy} />
+          <button disabled={busy} onClick={() => run("city")}>{tr("Скачать город")}</button>
         </div>
         {choices.length > 0 && (
           // стили прямо здесь, чтобы не трогать общий index.css (он у компьютера 1)
           <div style={{ display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }}>
-            <p className="hint" style={{ margin: 0 }}>Городов с таким названием несколько, выберите нужный:</p>
+            <p className="hint" style={{ margin: 0 }}>{tr("Городов с таким названием несколько, выберите нужный:")}</p>
             {choices.map((c) => (
               <button key={c.key} onClick={() => run("city", c)} disabled={busy} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, textAlign: "left", padding: "6px 10px", height: "auto" }}>
                 <b>{c.city}</b>
-                <span className="hint" style={{ margin: 0 }}>{c.where || "страна не указана"} · {fmtPop(c.population)}{c.population > BIG_CITY ? " · скачается кусками" : ""}</span>
+                <span className="hint" style={{ margin: 0 }}>{c.where || tr("страна не указана")} · {fmtPop(c.population)}{c.population > BIG_CITY ? tr(" · скачается кусками") : ""}</span>
               </button>
             ))}
           </div>
         )}
-        {hasMap && <label className="opt"><input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} disabled={busy} /> Присоединить к открытой карте (иначе открытая карта заменится)</label>}
-        <label className="opt"><input type="checkbox" checked={withBuildings} onChange={(e) => setWithBuildings(e.target.checked)} disabled={busy} /> Вместе со зданиями (нужны для 3D и Webots)</label>
-        {busy && <p className="hint">{stage || "Загрузка..."} Крупный город может скачиваться несколько минут.</p>}
+        {hasMap && <label className="opt"><input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} disabled={busy} /> {" "}{tr("Присоединить к открытой карте (иначе открытая карта заменится)")}</label>}
+        <label className="opt"><input type="checkbox" checked={withBuildings} onChange={(e) => setWithBuildings(e.target.checked)} disabled={busy} /> {" "}{tr("Вместе со зданиями (нужны для 3D и Webots)")}</label>
+        {busy && <p className="hint">{stage || tr("Загрузка...")} {" "}{tr("Крупный город может скачиваться несколько минут.")}</p>}
         {err && <p className="error">{err}</p>}
         <div className="foot">
-          {busy ? <button onClick={() => abort.current?.abort()}>Отмена</button> : <button onClick={onClose}>Закрыть</button>}
+          {busy ? <button onClick={() => abort.current?.abort()}>{tr("Отмена")}</button> : <button onClick={onClose}>{tr("Закрыть")}</button>}
         </div>
       </div>
     </div>
@@ -345,29 +346,28 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
     let p: string | null | undefined;
     if (overwrite && filePath && window.api) p = await window.api.writeFile(filePath, text);
     else p = await saveOsmText(/\.osm$/i.test(name) ? name : name + ".osm", text);
-    if (p) { useEditor.getState().toast("Сохранено: " + p); onClose(); }
+    if (p) { useEditor.getState().toast(tr("Сохранено: ") + p); onClose(); }
   }
 
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog">
-        <h2>Сохранение графа в .osm</h2>
+        <h2>{tr("Сохранение графа в .osm")}</h2>
         <div className="checks">
-          <div><span className={"ico " + (crit ? "bad" : "ok")}><Icon name={crit ? "close" : "check"} size={13} /></span>{crit ? `Критичных ошибок: ${crit}. Машины будут телепортироваться или стоять.` : "Критичных ошибок нет"}</div>
-          <div><span className={"ico " + (warn ? "warn" : "ok")}><Icon name={warn ? "alert" : "check"} size={13} /></span>{warn ? `Предупреждений: ${warn}` : "Предупреждений нет"}</div>
-          <div><span className={"ico " + (pct >= 95 ? "ok" : "warn")}><Icon name={pct >= 95 ? "check" : "alert"} size={13} /></span>Связность по направлениям: {pct.toFixed(1)}% узлов{pct >= 95 ? "" : ", цель 95%"}</div>
-          <div><span className="ico ok"><Icon name="check" size={13} /></span>{newCount ? `${newCount} новых элементов получат положительные id` : "Новых элементов нет"}</div>
-          <div><span className="ico ok"><Icon name="check" size={13} /></span>Здания, остановки, маршруты и запреты поворотов сохранятся без изменений</div>
+          <div><span className={"ico " + (crit ? "bad" : "ok")}><Icon name={crit ? "close" : "check"} size={13} /></span>{crit ? tr("Критичных ошибок: {0}. Машины будут телепортироваться или стоять.", crit) : tr("Критичных ошибок нет")}</div>
+          <div><span className={"ico " + (warn ? "warn" : "ok")}><Icon name={warn ? "alert" : "check"} size={13} /></span>{warn ? tr("Предупреждений: {0}", warn) : tr("Предупреждений нет")}</div>
+          <div><span className={"ico " + (pct >= 95 ? "ok" : "warn")}><Icon name={pct >= 95 ? "check" : "alert"} size={13} /></span>{tr("Связность по направлениям:")}{" "}{pct.toFixed(1)}{tr("% узлов")}{pct >= 95 ? "" : tr(", цель 95%")}</div>
+          <div><span className="ico ok"><Icon name="check" size={13} /></span>{newCount ? tr("{0} новых элементов получат положительные id", newCount) : tr("Новых элементов нет")}</div>
+          <div><span className="ico ok"><Icon name="check" size={13} /></span>{tr("Здания, остановки, маршруты и запреты поворотов сохранятся без изменений")}</div>
         </div>
-        <label className="field">Имя файла
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-          <span className="hint">Сервер проверки принимает файл с именем команды: команда team1 отправляет team1.osm.</span>
+        <label className="field">{tr("Имя файла")}<input value={name} onChange={(e) => setName(e.target.value)} />
+          <span className="hint">{tr("Сервер проверки принимает файл с именем команды: команда team1 отправляет team1.osm.")}</span>
         </label>
         <div className="foot">
-          {crit > 0 && <button onClick={() => { onClose(); setTab("Откройте вкладку «Ошибки» справа"); }}>Сначала исправить</button>}
-          {filePath && window.api && <button onClick={() => save(true)}>Перезаписать {fileName}</button>}
-          <button className="primary" onClick={() => save(false)}>Сохранить как...</button>
-          <button onClick={onClose}>Отмена</button>
+          {crit > 0 && <button onClick={() => { onClose(); setTab(tr("Откройте вкладку «Ошибки» справа")); }}>{tr("Сначала исправить")}</button>}
+          {filePath && window.api && <button onClick={() => save(true)}>{tr("Перезаписать")}{" "}{fileName}</button>}
+          <button className="primary" onClick={() => save(false)}>{tr("Сохранить как...")}</button>
+          <button onClick={onClose}>{tr("Отмена")}</button>
         </div>
       </div>
     </div>

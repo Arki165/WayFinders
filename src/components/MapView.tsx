@@ -15,12 +15,13 @@ import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
 import { cityPois, isMetroWay, metroLineCount, metroLines, poiKind, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
 const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind(n) : null);
 
-const POI_TEXT: Record<PoiKind, string> = { crossing: "Пешеходный переход", bus: "Автобусная остановка", tram: "Трамвайная остановка", train: "Ж/д станция или платформа", metro: "Станция метро", entrance: "Вход в метро" };
+const POI_TEXT: Record<PoiKind, string> = { get crossing() { return tr("Пешеходный переход"); }, get bus() { return tr("Автобусная остановка"); }, get tram() { return tr("Трамвайная остановка"); }, get train() { return tr("Ж/д станция или платформа"); }, get metro() { return tr("Станция метро"); }, get entrance() { return tr("Вход в метро"); } };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
 import { getRoute, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmData, OsmWay } from "../osm/types";
+import { tr, useLang } from "../i18n";
 
 export type Basemap = "map" | "satellite";
 
@@ -112,7 +113,7 @@ maplibregl.addProtocol("esri", async (params, abort) => {
     cv.getContext("2d")!.drawImage(bmp, (X % (1 << up)) * size, (Y % (1 << up)) * size, size, size, 0, 0, 256, 256);
     return { data: await (await cv.convertToBlob({ type: "image/png" })).arrayBuffer() };
   }
-  throw new Error("Нет плитки подложки");
+  throw new Error(tr("Нет плитки подложки"));
 });
 
 // Стрелка направления у односторонних дорог: SVG-картинка, цвет задается слоем (mask)
@@ -137,8 +138,8 @@ class FitAllControl implements maplibregl.IControl {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "fit-all";
-    btn.title = "Показать весь граф";
-    btn.setAttribute("aria-label", "Показать весь граф");
+    btn.title = tr("Показать весь граф");
+    btn.setAttribute("aria-label", tr("Показать весь граф"));
     // та же иконка, что fitAll в Icon.tsx
     btn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
     btn.onclick = () => {
@@ -290,6 +291,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const highlight = useEditor((s) => s.highlight);
   // подсвеченные дороги (найденная улица, ошибка): красятся в слое, без пересборки всей карты
   const hlSet = useMemo(() => new Set(highlight), [highlight]);
+  const langId = useLang((s) => s.lang); // язык: подписи и подсказки карты перерисовываются
   const laneSel = useLane((s) => s.sel);
   // атлас значков (светофоры, переходы, остановки, метро) - одна картинка, грузится один раз
   const [iconAtlas, setIconAtlas] = useState<string | null>(null);
@@ -536,11 +538,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (nodeId !== null) {
           const k = poiKindOf(st.data.nodes.get(nodeId));
           if (k === "bus" || k === "tram") return toggleRouteStop(rt.id, nodeId);
-          return st.toast("Это не остановка. Кликните значок остановки или дорогу");
+          return st.toast(tr("Это не остановка. Кликните значок остановки или дорогу"));
         }
         const w = wayId !== null ? st.data.ways.get(wayId) : undefined;
         if (w && (isDrivable(w) || w.tags.railway === "tram")) return toggleRouteWay(rt.id, w.id);
-        if (w) return st.toast("Маршрут идет только по проезжим дорогам и трамвайным путям");
+        if (w) return st.toast(tr("Маршрут идет только по проезжим дорогам и трамвайным путям"));
         return;
       }
       if (t === "select" && shift) {
@@ -561,18 +563,18 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // дорогу сквозь здание не рисуем: точка не ставится, программа объясняет почему
         const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
         const prev = live.current.draw;
-        if (lineHitsBuilding(prev.length ? [prev[prev.length - 1], pt] : [pt], tpl.tags)) return st.toast(THROUGH_BUILDING);
+        if (lineHitsBuilding(prev.length ? [prev[prev.length - 1], pt] : [pt], tpl.tags)) return st.toast(tr(THROUGH_BUILDING));
         setDraw((d) => [...d, pt]);
       } else if (t === "node") {
-        if (nodeId !== null) { st.select({ kind: "node", id: nodeId }); return st.toast("Здесь уже есть узел"); }
-        if (wayId === null) return st.toast("Кликните по линии дороги, туда встанет новый узел");
+        if (nodeId !== null) { st.select({ kind: "node", id: nodeId }); return st.toast(tr("Здесь уже есть узел")); }
+        if (wayId === null) return st.toast(tr("Кликните по линии дороги, туда встанет новый узел"));
         insertNode(wayId, e.lngLat.lat, e.lngLat.lng);
       } else if (t === "join") {
         // шаг 1: выбрать узел, который присоединяем; шаг 2: кликнуть узел или дорогу, к которой присоединяем
         const s = st.selection;
         const from = s?.kind === "node" ? s.id : null;
         if (from === null) {
-          if (nodeId === null) return st.toast("Сначала кликните узел, который нужно присоединить (например, конец дороги)");
+          if (nodeId === null) return st.toast(tr("Сначала кликните узел, который нужно присоединить (например, конец дороги)"));
           st.select({ kind: "node", id: nodeId });
           return;
         }
@@ -581,28 +583,28 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         else if (wayId !== null) joinNodeToWay(from, wayId);
         else st.select(null);
       } else if (t === "unjoin") {
-        if (nodeId === null) return st.toast("Кликните по узлу, где сходятся дороги");
+        if (nodeId === null) return st.toast(tr("Кликните по узлу, где сходятся дороги"));
         unjoinNode(nodeId);
       } else if (t === "signal") {
-        if (nodeId === null) return st.toast("Кликните по узлу дороги (включите масштаб поближе)");
+        if (nodeId === null) return st.toast(tr("Кликните по узлу дороги (включите масштаб поближе)"));
         const n = st.data.nodes.get(nodeId)!;
         const tags = { ...n.tags };
         // пешеходный переход в этом узле не пропадает: со светофором он становится регулируемым, без него - обычным
         if (tags.highway === "traffic_signals") {
           if (tags.crossing) { tags.highway = "crossing"; tags.crossing = "uncontrolled"; } else delete tags.highway;
-          setNodeTags(nodeId, tags, "Светофор убран");
+          setNodeTags(nodeId, tags, tr("Светофор убран"));
         } else {
           if (tags.highway === "crossing" || tags.crossing) tags.crossing = "traffic_signals";
           tags.highway = "traffic_signals";
-          setNodeTags(nodeId, tags, "Светофор добавлен");
+          setNodeTags(nodeId, tags, tr("Светофор добавлен"));
         }
         st.select({ kind: "node", id: nodeId });
       } else if (t === "split") {
-        if (nodeId === null) return st.toast("Кликните по среднему узлу дороги");
+        if (nodeId === null) return st.toast(tr("Кликните по среднему узлу дороги"));
         const s = st.selection;
         const way = s?.kind === "way" && st.data.ways.get(s.id)?.nodeIds.includes(nodeId) ? st.data.ways.get(s.id)! :
           [...st.data.ways.values()].find((w) => isDrivable(w) && w.nodeIds.indexOf(nodeId) > 0 && w.nodeIds.indexOf(nodeId) < w.nodeIds.length - 1);
-        if (!way) return st.toast("Этот узел - конец дороги, резать нечего");
+        if (!way) return st.toast(tr("Этот узел - конец дороги, резать нечего"));
         splitWay(way.id, nodeId);
       } else if (t === "delete") {
         if (nodeId !== null) deleteNode(nodeId);
@@ -617,11 +619,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pts = live.current.draw;
     setDraw([]);
     setCursor(null);
-    if (pts.length < 2) return useEditor.getState().toast("Нужно минимум две точки");
+    if (pts.length < 2) return useEditor.getState().toast(tr("Нужно минимум две точки"));
     const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
-    if (tpl.kind === "area" && pts.length < 3) return useEditor.getState().toast("Для здания нужно минимум три угла");
+    if (tpl.kind === "area" && pts.length < 3) return useEditor.getState().toast(tr("Для здания нужно минимум три угла"));
     if (!addWay(pts, tpl.tags)) return;
-    useEditor.getState().toast(tpl.kind === "area" ? "Здание добавлено. Этажность меняется справа" : `Добавлено по шаблону «${tpl.name}»`);
+    useEditor.getState().toast(tpl.kind === "area" ? tr("Здание добавлено. Этажность меняется справа") : tr("Добавлено по шаблону «{0}»", tpl.name));
   }
 
   // Enter заканчивает дорогу, Esc отменяет рисование
@@ -730,7 +732,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const metro = metroLines(data);
     const zebra = zebras(data, pois);
     return { br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
-  }, [data, version, heat, norms, showBuildings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, version, heat, norms, showBuildings, langId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- полосы и разметка в видимой части карты ----------
   const lanesOn = zoom >= LANES_ZOOM;
@@ -1022,19 +1024,19 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
       layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers, ...handleLayers] : [buildingsLayer, ...groundLayers, ...pointLayers, ...handleLayers],
     });
-  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark, routeData]);
+  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark, routeData, langId]);
 
   const hint: Record<string, string> = {
-    select: "Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого.",
-    draw: "Кликайте точки новой дороги, к узлам прилипает. Enter или двойной клик - готово, Esc - отмена.",
-    signal: "Клик по узлу дороги ставит или убирает светофор.",
-    split: "Клик по среднему узлу дороги разрезает ее на две.",
-    node: "Клик по линии дороги добавляет на нее новый узел.",
+    select: tr("Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого."),
+    draw: tr("Кликайте точки новой дороги, к узлам прилипает. Enter или двойной клик - готово, Esc - отмена."),
+    signal: tr("Клик по узлу дороги ставит или убирает светофор."),
+    split: tr("Клик по среднему узлу дороги разрезает ее на две."),
+    node: tr("Клик по линии дороги добавляет на нее новый узел."),
     join: selection?.kind === "node"
-      ? "Шаг 2 из 2: кликните узел или дорогу, к которой присоединить выбранный узел. Esc - отмена."
-      : "Шаг 1 из 2: кликните узел, который нужно присоединить (например, конец дороги).",
-    unjoin: "Клик по узлу, где сходятся дороги, разъединяет их: у каждой дороги будет свой узел.",
-    delete: "Клик по дороге или узлу удаляет его.",
+      ? tr("Шаг 2 из 2: кликните узел или дорогу, к которой присоединить выбранный узел. Esc - отмена.")
+      : tr("Шаг 1 из 2: кликните узел, который нужно присоединить (например, конец дороги)."),
+    unjoin: tr("Клик по узлу, где сходятся дороги, разъединяет их: у каждой дороги будет свой узел."),
+    delete: tr("Клик по дороге или узлу удаляет его."),
   };
 
   return (
@@ -1048,7 +1050,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       {data && <LayersPanel level={level} show={show} onLevel={setLevel} onShow={setShow} metroCount={layersData?.metroCount ?? 0} />}
       {data && showChanges && (
         <div className="legend">
-          {changes.length === 0 ? "Правок пока нет" : (["added", "changed", "deleted"] as ChangeKind[]).map((k) => (
+          {changes.length === 0 ? tr("Правок пока нет") : (["added", "changed", "deleted"] as ChangeKind[]).map((k) => (
             <span key={k}><i style={{ background: `rgb(${CHANGE_COLORS[k].slice(0, 3).join(",")})` }} />{CHANGE_TEXT[k]}: {changes.filter((c) => c.kind === k).length}</span>
           ))}
         </div>

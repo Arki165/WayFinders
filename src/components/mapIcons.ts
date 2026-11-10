@@ -1,5 +1,6 @@
 // Значки объектов на карте (SVG внутри программы, без загрузки из интернета)
 import type { PoiKind } from "../model/poi";
+import { tr } from "../i18n";
 
 export type IconKind = PoiKind | "signal";
 
@@ -54,7 +55,7 @@ export function loadIconAtlas(): Promise<string> {
       cv.getContext("2d")!.drawImage(img, 0, 0, cv.width, cv.height);
       ok(cv.toDataURL("image/png"));
     };
-    img.onerror = () => bad(new Error("Не удалось нарисовать значки карты"));
+    img.onerror = () => bad(new Error(tr("Не удалось нарисовать значки карты")));
     img.src = ICON_ATLAS;
   });
   return atlas;
@@ -63,11 +64,11 @@ export const ICON_MAPPING_2X = Object.fromEntries(KINDS.map((k, i) => [k, { x: i
 export const ICON_MAPPING = Object.fromEntries(KINDS.map((k, i) => [k, { x: i * S, y: 0, width: S, height: S, mask: false }]));
 
 export const ICON_TITLES: Record<IconKind, string> = {
-  signal: "Светофор",
-  crossing: "Пешеходный переход",
-  bus: "Остановка автобуса",
-  tram: "Остановка трамвая",
-  train: "Станция, платформа",
-  metro: "Станция метро",
-  entrance: "Вход в метро",
+  get signal() { return tr("Светофор"); },
+  get crossing() { return tr("Пешеходный переход"); },
+  get bus() { return tr("Остановка автобуса"); },
+  get tram() { return tr("Остановка трамвая"); },
+  get train() { return tr("Станция, платформа"); },
+  get metro() { return tr("Станция метро"); },
+  get entrance() { return tr("Вход в метро"); },
 };

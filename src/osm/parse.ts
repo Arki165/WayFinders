@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { OsmData, OsmMember, Tags } from "./types";
+import { tr } from "../i18n";
 
 type Raw = Record<string, unknown>;
 
@@ -31,7 +32,7 @@ function readAttrs(el: Raw, skip: string[]): Record<string, string> {
 export function parseOsm(text: string): OsmData {
   const xml = parser.parse(text);
   const osm = xml.osm as Raw | undefined;
-  if (!osm) throw new Error("Это не файл OSM: нет тега <osm>");
+  if (!osm) throw new Error(tr("Это не файл OSM: нет тега <osm>"));
 
   const data: OsmData = { nodes: new Map(), ways: new Map(), relations: new Map(), bounds: null, header: readAttrs(osm, []) };
 

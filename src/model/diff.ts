@@ -1,6 +1,7 @@
 // Сравнение текущего графа с исходным файлом
 import type { OsmData } from "../osm/types";
 import { drivableNodeSet, isDrivable, isRoadSignal, wayName } from "./roads";
+import { tr } from "../i18n";
 
 export interface WayChange {
   id: number;
@@ -13,7 +14,7 @@ export function diffData(before: OsmData, after: OsmData): { ways: WayChange[]; 
   const ways: WayChange[] = [];
   for (const w of after.ways.values()) {
     const old = before.ways.get(w.id);
-    if (!old) { ways.push({ id: w.id, name: wayName(w), kind: "added", details: [w.tags.highway ? `highway=${w.tags.highway}` : "новая линия"] }); continue; }
+    if (!old) { ways.push({ id: w.id, name: wayName(w), kind: "added", details: [w.tags.highway ? `highway=${w.tags.highway}` : tr("новая линия")] }); continue; }
     const details: string[] = [];
     const keys = new Set([...Object.keys(old.tags), ...Object.keys(w.tags)]);
     for (const k of keys) {
@@ -22,7 +23,7 @@ export function diffData(before: OsmData, after: OsmData): { ways: WayChange[]; 
       else if (w.tags[k] === undefined) details.push(`− ${k}`);
       else details.push(`${k}: ${old.tags[k]} → ${w.tags[k]}`);
     }
-    if (old.nodeIds.join() !== w.nodeIds.join()) details.push(old.nodeIds.slice().reverse().join() === w.nodeIds.join() ? "развернуто направление" : "изменены узлы");
+    if (old.nodeIds.join() !== w.nodeIds.join()) details.push(old.nodeIds.slice().reverse().join() === w.nodeIds.join() ? tr("развернуто направление") : tr("изменены узлы"));
     if (details.length) ways.push({ id: w.id, name: wayName(w), kind: "changed", details });
   }
   for (const w of before.ways.values()) if (!after.ways.has(w.id)) ways.push({ id: w.id, name: wayName(w), kind: "deleted", details: [] });

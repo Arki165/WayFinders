@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useEditor } from "../model/store";
 import { createRoute, deleteRoute, listRoutes, ROUTE_KINDS, ROUTE_RU, setRouteInfo, useRoute, type Route, type RouteKind } from "../model/routes";
 import Icon from "./Icon";
+import { locale, nameOf, toLatin, tr } from "../i18n";
 
 const rgb = (c: [number, number, number]) => `rgb(${c.join(",")})`;
-const km = (m: number) => (m / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+const km = (m: number) => (m / 1000).toLocaleString(locale(), { maximumFractionDigits: 1 });
 
 export default function RoutesPanel() {
   const data = useEditor((s) => s.data)!;
@@ -38,13 +39,13 @@ export default function RoutesPanel() {
     if (w <= e) useEditor.getState().fitTo([w, s, e, n]);
   }
 
-  const newBtn = <button className="route-new" onClick={() => setCreating(true)}><Icon name="plus" size={14} />Свой маршрут</button>;
-  if (creating) return <div className="pane routes"><RouteForm title="Новый маршрут" onCancel={() => setCreating(false)} onSave={(k, ref) => { setCreating(false); setKind("all"); setQ(""); createRoute(k, ref); }} /></div>;
+  const newBtn = <button className="route-new" onClick={() => setCreating(true)}><Icon name="plus" size={14} />{tr("Свой маршрут")}</button>;
+  if (creating) return <div className="pane routes"><RouteForm title={tr("Новый маршрут")} onCancel={() => setCreating(false)} onSave={(k, ref) => { setCreating(false); setKind("all"); setQ(""); createRoute(k, ref); }} /></div>;
 
   if (!routes.length) {
     return (
       <div className="pane routes">
-        <p className="hint">В файле нет маршрутов общественного транспорта. Они есть в файле-примере и скачиваются вместе с районом из OpenStreetMap (кнопка с глобусом вверху). Можно нарисовать свой маршрут.</p>
+        <p className="hint">{tr("В файле нет маршрутов общественного транспорта. Они есть в файле-примере и скачиваются вместе с районом из OpenStreetMap (кнопка с глобусом вверху). Можно нарисовать свой маршрут.")}</p>
         {newBtn}
       </div>
     );
@@ -56,41 +57,41 @@ export default function RoutesPanel() {
       <div className="routes-top">
       <label className="routes-search">
         <Icon name="search" size={14} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Номер или остановка" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Номер или остановка")} />
       </label>
       {newBtn}
       </div>
       <div className="seg routes-kinds">
-        <button className={kind === "all" ? "on" : ""} onClick={() => setKind("all")}>Все {routes.length}</button>
+        <button className={kind === "all" ? "on" : ""} onClick={() => setKind("all")}>{tr("Все")}{" "}{routes.length}</button>
         {ROUTE_KINDS.filter((k) => count(k)).map((k) => <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{ROUTE_RU[k]} {count(k)}</button>)}
       </div>
 
       {sel && (
         <div className="route-card">
           <div className="route-head">
-            <span className="route-num" style={{ background: rgb(sel.color) }}>{sel.ref}</span>
-            <b>{ROUTE_RU[sel.kind]} {sel.ref}{sel.custom && <small className="route-own">свой</small>}</b>
-            {!editing && <button className="icon-btn" onClick={() => edit(true)} title="Изменить маршрут: дороги, остановки, номер"><Icon name="draw" size={14} /></button>}
-            <button className="icon-btn" onClick={() => setRoute(null)} title="Убрать маршрут с карты"><Icon name="close" size={14} /></button>
+            <span className="route-num" style={{ background: rgb(sel.color) }}>{toLatin(sel.ref)}</span>
+            <b>{ROUTE_RU[sel.kind]} {toLatin(sel.ref)}{sel.custom && <small className="route-own">{tr("свой")}</small>}</b>
+            {!editing && <button className="icon-btn" onClick={() => edit(true)} title={tr("Изменить маршрут: дороги, остановки, номер")}><Icon name="draw" size={14} /></button>}
+            <button className="icon-btn" onClick={() => setRoute(null)} title={tr("Убрать маршрут с карты")}><Icon name="close" size={14} /></button>
           </div>
-          <div className="sub">{sel.name}</div>
-          <div className="sub">{km(sel.lengthM)} км по дорогам · остановок: {sel.stops.length}</div>
+          <div className="sub">{toLatin(sel.name)}</div>
+          <div className="sub">{km(sel.lengthM)} {" "}{tr("км по дорогам · остановок:")}{" "}{sel.stops.length}</div>
           {editing && (
             <div className="route-edit">
-              <RouteForm key={sel.id} title="" initial={sel} onSave={(k, ref) => setRouteInfo(sel.id, k, ref)} saveLabel="Сохранить" />
-              <p className="hint">Кликайте на карте дороги по порядку движения: дорога добавится в маршрут, повторный клик уберет ее. Так же кликайте значки остановок. Отменить: Ctrl+Z.</p>
+              <RouteForm key={sel.id} title="" initial={sel} onSave={(k, ref) => setRouteInfo(sel.id, k, ref)} saveLabel={tr("Сохранить")} />
+              <p className="hint">{tr("Кликайте на карте дороги по порядку движения: дорога добавится в маршрут, повторный клик уберет ее. Так же кликайте значки остановок. Отменить: Ctrl+Z.")}</p>
               <div className="chips">
-                <button className="on" onClick={() => edit(false)}>Готово</button>
-                {sel.custom && <button className="danger" onClick={() => { if (confirm(`Удалить маршрут ${sel.ref}?`)) deleteRoute(sel.id); }}><Icon name="trash" size={14} />Удалить маршрут</button>}
+                <button className="on" onClick={() => edit(false)}>{tr("Готово")}</button>
+                {sel.custom && <button className="danger" onClick={() => { if (confirm(tr("Удалить маршрут {0}?", sel.ref))) deleteRoute(sel.id); }}><Icon name="trash" size={14} />{tr("Удалить маршрут")}</button>}
               </div>
             </div>
           )}
-          {sel.missing > 0 && <p className="hint">Часть маршрута за краем карты: {sel.missing} участков нет в файле.</p>}
+          {sel.missing > 0 && <p className="hint">{tr("Часть маршрута за краем карты:")}{" "}{sel.missing} {" "}{tr("участков нет в файле.")}</p>}
           {sel.stops.length > 0 && (
             <ol className="route-stops">
               {sel.stops.map((id, i) => {
                 const n = data.nodes.get(id);
-                return <li key={id + ":" + i}><button onClick={() => { useEditor.getState().select({ kind: "node", id }); if (n) useEditor.getState().flyTo(n.lat, n.lon, 17.5); }}>{n?.tags.name || "Остановка без названия"}</button></li>;
+                return <li key={id + ":" + i}><button onClick={() => { useEditor.getState().select({ kind: "node", id }); if (n) useEditor.getState().flyTo(n.lat, n.lon, 17.5); }}>{(n && nameOf(n.tags)) || tr("Остановка без названия")}</button></li>;
               })}
             </ol>
           )}
@@ -99,32 +100,32 @@ export default function RoutesPanel() {
 
       <div className="route-list">
         {shown.map((r) => (
-          <button key={r.id} className={"route-item" + (r.id === routeId ? " on" : "")} onClick={() => pick(r)} title="Показать на карте">
-            <span className="route-num" style={{ background: rgb(r.color) }}>{r.ref}</span>
-            <span className="route-text"><span>{r.name}</span><small>{ROUTE_RU[r.kind]} · {km(r.lengthM)} км · {r.stops.length} ост.</small></span>
+          <button key={r.id} className={"route-item" + (r.id === routeId ? " on" : "")} onClick={() => pick(r)} title={tr("Показать на карте")}>
+            <span className="route-num" style={{ background: rgb(r.color) }}>{toLatin(r.ref)}</span>
+            <span className="route-text"><span>{toLatin(r.name)}</span><small>{ROUTE_RU[r.kind]} · {km(r.lengthM)} {" "}{tr("км ·")}{" "}{r.stops.length} {" "}{tr("ост.")}</small></span>
           </button>
         ))}
-        {!shown.length && <p className="hint">Ничего не найдено</p>}
+        {!shown.length && <p className="hint">{tr("Ничего не найдено")}</p>}
       </div>
     </div>
   );
 }
 
 // Форма маршрута: вид транспорта и номер. Начало и конец берутся из первой и последней остановки
-function RouteForm({ title, initial, onSave, onCancel, saveLabel = "Создать и рисовать" }: { title: string; initial?: Route; onSave: (k: RouteKind, ref: string) => void; onCancel?: () => void; saveLabel?: string }) {
+function RouteForm({ title, initial, onSave, onCancel, saveLabel = tr("Создать и рисовать") }: { title: string; initial?: Route; onSave: (k: RouteKind, ref: string) => void; onCancel?: () => void; saveLabel?: string }) {
   const [k, setK] = useState<RouteKind>(initial?.kind ?? "bus");
   const [ref, setRef] = useState(initial?.ref ?? "");
   const ok = ref.trim() !== "" && (!initial || k !== initial.kind || ref.trim() !== initial.ref);
   return (
     <form className="route-form" onSubmit={(e) => { e.preventDefault(); if (ok) onSave(k, ref.trim()); }}>
       {title && <h3>{title}</h3>}
-      <label><span>Вид</span><select value={k} onChange={(e) => setK(e.target.value as RouteKind)}>{ROUTE_KINDS.map((x) => <option key={x} value={x}>{ROUTE_RU[x]}</option>)}</select></label>
-      <label><span>Номер</span><input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="например, 12к" autoFocus={!initial} /></label>
+      <label><span>{tr("Вид")}</span><select value={k} onChange={(e) => setK(e.target.value as RouteKind)}>{ROUTE_KINDS.map((x) => <option key={x} value={x}>{ROUTE_RU[x]}</option>)}</select></label>
+      <label><span>{tr("Номер")}</span><input value={ref} onChange={(e) => setRef(e.target.value)} placeholder={tr("например, 12к")} autoFocus={!initial} /></label>
       <div className="chips">
         <button type="submit" className="on" disabled={!ok}>{saveLabel}</button>
-        {onCancel && <button type="button" onClick={onCancel}>Отмена</button>}
+        {onCancel && <button type="button" onClick={onCancel}>{tr("Отмена")}</button>}
       </div>
-      {!initial && <p className="hint">Дальше кликайте на карте дороги по порядку движения и значки остановок. Начало и конец маршрута - первая и последняя остановка.</p>}
+      {!initial && <p className="hint">{tr("Дальше кликайте на карте дороги по порядку движения и значки остановок. Начало и конец маршрута - первая и последняя остановка.")}</p>}
     </form>
   );
 }

@@ -4,6 +4,7 @@ import { diffData, summary } from "../model/diff";
 import { validate } from "../model/validate";
 import { toCsv, saveCsv } from "../model/exporting";
 import Icon from "./Icon";
+import { tr } from "../i18n";
 
 export default function ComparePanel() {
   const data = useEditor((s) => s.data);
@@ -16,28 +17,28 @@ export default function ComparePanel() {
 
   const before = useMemo(() => (original ? { s: summary(original), v: validate(original) } : null), [original]);
   const now = useMemo(() => (data ? { s: summary(data), d: diffData(original!, data) } : null), [data, original, version]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!data || !before || !now || !check) return <p className="hint pad">Откройте файл .osm</p>;
+  if (!data || !before || !now || !check) return <p className="hint pad">{tr("Откройте файл .osm")}</p>;
 
   const cnt = (errs: { sev: string }[], s: string) => errs.filter((e) => e.sev === s).length;
   const pct = (v: { sccMain: number; nodes: number }) => (v.nodes ? (v.sccMain / v.nodes) * 100 : 100);
   const rows: [string, number, number, number, number][] = [
     // название, было, стало, знак "хорошо" (+1 больше лучше, -1 меньше лучше, 0 нейтрально), знаков после запятой
-    ["Критичных ошибок", cnt(before.v.errors, "danger"), cnt(check.errors, "danger"), -1, 0],
-    ["Предупреждений", cnt(before.v.errors, "warn"), cnt(check.errors, "warn"), -1, 0],
-    ["Связность по направлениям, %", pct(before.v), pct(check), 1, 1],
-    ["Проезжих дорог", before.s.roads, now.s.roads, 0, 0],
-    ["Дорог с числом полос", before.s.withLanes, now.s.withLanes, 1, 0],
-    ["Дорог со скоростью", before.s.withSpeed, now.s.withSpeed, 1, 0],
-    ["Дорог с покрытием", before.s.withSurface, now.s.withSurface, 1, 0],
-    ["Односторонних дорог", before.s.oneway, now.s.oneway, 0, 0],
-    ["Светофоров на дорогах", before.s.signals, now.s.signals, 0, 0],
-    ["Светофоров с временем фаз", before.s.signalsTimed, now.s.signalsTimed, 1, 0],
+    [tr("Критичных ошибок"), cnt(before.v.errors, "danger"), cnt(check.errors, "danger"), -1, 0],
+    [tr("Предупреждений"), cnt(before.v.errors, "warn"), cnt(check.errors, "warn"), -1, 0],
+    [tr("Связность по направлениям, %"), pct(before.v), pct(check), 1, 1],
+    [tr("Проезжих дорог"), before.s.roads, now.s.roads, 0, 0],
+    [tr("Дорог с числом полос"), before.s.withLanes, now.s.withLanes, 1, 0],
+    [tr("Дорог со скоростью"), before.s.withSpeed, now.s.withSpeed, 1, 0],
+    [tr("Дорог с покрытием"), before.s.withSurface, now.s.withSurface, 1, 0],
+    [tr("Односторонних дорог"), before.s.oneway, now.s.oneway, 0, 0],
+    [tr("Светофоров на дорогах"), before.s.signals, now.s.signals, 0, 0],
+    [tr("Светофоров с временем фаз"), before.s.signalsTimed, now.s.signalsTimed, 1, 0],
   ];
   const d = now.d;
 
   const exportCsv = () => {
-    const part1 = toCsv(["Показатель", "Исходный файл", "Сейчас", "Изменение"], rows.map(([t, a, b, , n]) => [t, +a.toFixed(n), +b.toFixed(n), +(b - a).toFixed(n)]));
-    const part2 = toCsv(["Изменение", "way id", "Дорога", "Что изменилось"], d.ways.map((w) => [w.kind === "added" ? "добавлена" : w.kind === "deleted" ? "удалена" : "изменена", w.id, w.name, w.details.join(", ")])).slice(1);
+    const part1 = toCsv([tr("Показатель"), tr("Исходный файл"), tr("Сейчас"), tr("Изменение")], rows.map(([t, a, b, , n]) => [t, +a.toFixed(n), +b.toFixed(n), +(b - a).toFixed(n)]));
+    const part2 = toCsv([tr("Изменение"), "way id", tr("Дорога"), tr("Что изменилось")], d.ways.map((w) => [w.kind === "added" ? tr("добавлена") : w.kind === "deleted" ? tr("удалена") : tr("изменена"), w.id, w.name, w.details.join(", ")])).slice(1);
     saveCsv(fileName.replace(/\.osm$/i, "") + "_changes.csv", part1 + "\r\n\r\n" + part2);
   };
   const goWay = (id: number) => {
@@ -51,7 +52,7 @@ export default function ComparePanel() {
   return (
     <div className="cmp">
       <table className="tbl">
-        <thead><tr><th>Показатель</th><th className="r">Исходный</th><th className="r">Сейчас</th><th className="r">Изменение</th></tr></thead>
+        <thead><tr><th>{tr("Показатель")}</th><th className="r">{tr("Исходный")}</th><th className="r">{tr("Сейчас")}</th><th className="r">{tr("Изменение")}</th></tr></thead>
         <tbody>
           {rows.map(([t, a, b, good, n]) => {
             const delta = b - a;
@@ -62,19 +63,19 @@ export default function ComparePanel() {
       </table>
       <div className="cmp-list">
         <div className="chips">
-          <span className="hint">Дорог: +{d.ways.filter((w) => w.kind === "added").length} / изменено {d.ways.filter((w) => w.kind === "changed").length} / −{d.ways.filter((w) => w.kind === "deleted").length} · узлов перенесено {d.nodesMoved}, добавлено {d.nodesAdded}, удалено {d.nodesDeleted}, изменены теги у {d.nodeTagsChanged}</span>
-          <button onClick={exportCsv}><Icon name="download" size={14} />Сравнение CSV</button>
+          <span className="hint">{tr("Дорог: +")}{d.ways.filter((w) => w.kind === "added").length} {" "}{tr("/ изменено")}{" "}{d.ways.filter((w) => w.kind === "changed").length} / −{d.ways.filter((w) => w.kind === "deleted").length} {" "}{tr("· узлов перенесено")}{" "}{d.nodesMoved}{tr(", добавлено")}{" "}{d.nodesAdded}{tr(", удалено")}{" "}{d.nodesDeleted}{tr(", изменены теги у")}{" "}{d.nodeTagsChanged}</span>
+          <button onClick={exportCsv}><Icon name="download" size={14} />{tr("Сравнение CSV")}</button>
         </div>
         <table className="tbl">
           <tbody>
             {d.ways.slice(0, 150).map((w) => (
               <tr key={w.kind + w.id} className="click" onClick={() => goWay(w.id)}>
-                <td><span className={"kind " + w.kind}>{w.kind === "added" ? "добавлена" : w.kind === "deleted" ? "удалена" : "изменена"}</span></td>
+                <td><span className={"kind " + w.kind}>{w.kind === "added" ? tr("добавлена") : w.kind === "deleted" ? tr("удалена") : tr("изменена")}</span></td>
                 <td>{w.name}</td>
                 <td className="muted">{w.details.join(", ")}</td>
               </tr>
             ))}
-            {!d.ways.length && <tr><td className="muted">Изменений пока нет</td></tr>}
+            {!d.ways.length && <tr><td className="muted">{tr("Изменений пока нет")}</td></tr>}
           </tbody>
         </table>
       </div>

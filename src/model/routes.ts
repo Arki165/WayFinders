@@ -5,10 +5,11 @@ import { create } from "zustand";
 import type { OsmData, OsmRelation } from "../osm/types";
 import { distM } from "./geo";
 import { newId, runRelation, useEditor } from "./store";
+import { tr } from "../i18n";
 
 export type RouteKind = "bus" | "trolleybus" | "tram" | "share_taxi";
 export const ROUTE_KINDS: RouteKind[] = ["bus", "trolleybus", "tram", "share_taxi"];
-export const ROUTE_RU: Record<RouteKind, string> = { bus: "Автобус", trolleybus: "Троллейбус", tram: "Трамвай", share_taxi: "Маршрутка" };
+export const ROUTE_RU: Record<RouteKind, string> = { get bus() { return tr("Автобус"); }, get trolleybus() { return tr("Троллейбус"); }, get tram() { return tr("Трамвай"); }, get share_taxi() { return tr("Маршрутка"); } };
 // цвет по виду транспорта, если в OSM у маршрута нет своего цвета
 export const ROUTE_COLOR: Record<RouteKind, [number, number, number]> = { bus: [46, 158, 79], trolleybus: [31, 111, 209], tram: [214, 48, 49], share_taxi: [230, 140, 30] };
 
@@ -61,7 +62,7 @@ function toRoute(data: OsmData, r: OsmRelation): Route | null {
   }
   // название: «Автобус 16: Центр => Аэропорт» - берем часть после двоеточия, иначе from - to
   const custom = t[CUSTOM_KEY] === "yes";
-  const name = (t.from && t.to ? `${t.from} - ${t.to}` : custom ? "" : (t.name ?? "").replace(/^[^:]*:\s*/, "").replace(/\s*=>\s*/g, " - ")) || (custom ? "Остановки еще не выбраны" : "Без названия");
+  const name = (t.from && t.to ? `${t.from} - ${t.to}` : custom ? "" : (t.name ?? "").replace(/^[^:]*:\s*/, "").replace(/\s*=>\s*/g, " - ")) || (custom ? tr("Остановки еще не выбраны") : tr("Без названия"));
   return { id: r.id, kind: t.route, ref: t.ref ?? "?", name, color: parseColor(t.colour) ?? ROUTE_COLOR[t.route], ways, stops, missing, lengthM, custom };
 }
 
@@ -108,13 +109,15 @@ function renameRoute(d: OsmData, r: OsmRelation) {
   const t = { ...r.tags };
   delete t.from; delete t.to;
   if (names.length >= 2) { t.from = names[0]; t.to = names[names.length - 1]; }
-  t.name = `${ROUTE_RU[kind]} ${t.ref ?? ""}` + (t.from ? `: ${t.from} => ${t.to}` : "");
+  // название пишется в файл OSM, поэтому всегда по-русски, на каком бы языке ни был интерфейс
+  const KIND_RU: Record<RouteKind, string> = { bus: "Автобус", trolleybus: "Троллейбус", tram: "Трамвай", share_taxi: "Маршрутка" };
+  t.name = `${KIND_RU[kind]} ${t.ref ?? ""}` + (t.from ? `: ${t.from} => ${t.to}` : "");
   r.tags = t;
 }
 
 export function createRoute(kind: RouteKind, ref: string): number {
   const id = newId();
-  runRelation("Новый маршрут " + ref, id, (d) => {
+  runRelation(tr("Новый маршрут ") + ref, id, (d) => {
     const r: OsmRelation = { id, members: [], attrs: {}, tags: { type: "route", route: kind, ref, "public_transport:version": "2", [CUSTOM_KEY]: "yes" } };
     renameRoute(d, r);
     d.relations.set(id, r);
@@ -126,7 +129,7 @@ export function createRoute(kind: RouteKind, ref: string): number {
 
 // Вид транспорта и номер
 export function setRouteInfo(id: number, kind: RouteKind, ref: string) {
-  runRelation("Маршрут " + ref, id, (d) => {
+  runRelation(tr("Маршрут ") + ref, id, (d) => {
     const r = d.relations.get(id);
     if (!r) return;
     r.tags = { ...r.tags, route: kind, ref };
@@ -140,7 +143,7 @@ export function toggleRouteWay(id: number, wayId: number) {
   const r = d?.relations.get(id);
   if (!r) return;
   const has = r.members.some((m) => m.type === "way" && m.ref === wayId);
-  runRelation(has ? "Дорога убрана из маршрута" : "Дорога добавлена в маршрут", id, (dd) => {
+  runRelation(has ? tr("Дорога убрана из маршрута") : tr("Дорога добавлена в маршрут"), id, (dd) => {
     const x = dd.relations.get(id)!;
     if (has) x.members = x.members.filter((m) => !(m.type === "way" && m.ref === wayId));
     else x.members.push({ type: "way", ref: wayId, role: "" });
@@ -155,7 +158,7 @@ export function toggleRouteStop(id: number, nodeId: number) {
   const has = r.members.some((m) => m.type === "node" && m.ref === nodeId);
   // если в маршруте остановки записаны платформами, новую тоже записываем платформой (иначе ее не будет видно)
   const role = r.members.some((m) => m.type === "node" && m.role.startsWith("platform")) ? "platform" : "stop";
-  runRelation(has ? "Остановка убрана из маршрута" : "Остановка добавлена в маршрут", id, (dd) => {
+  runRelation(has ? tr("Остановка убрана из маршрута") : tr("Остановка добавлена в маршрут"), id, (dd) => {
     const x = dd.relations.get(id)!;
     if (has) x.members = x.members.filter((m) => !(m.type === "node" && m.ref === nodeId));
     else {
@@ -170,7 +173,7 @@ export function toggleRouteStop(id: number, nodeId: number) {
 }
 
 export function deleteRoute(id: number) {
-  runRelation("Маршрут удален", id, (d) => { d.relations.delete(id); });
+  runRelation(tr("Маршрут удален"), id, (d) => { d.relations.delete(id); });
   useRoute.getState().set(null);
 }
 

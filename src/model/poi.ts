@@ -1,5 +1,6 @@
 // Объекты города для слоев карты: пешеходные переходы, остановки, метро.
 // Только чтение данных, граф не меняется.
+import { nameOf } from "../i18n";
 import type { OsmData, OsmNode, OsmWay } from "../osm/types";
 import { isDrivable } from "./roads";
 import { roadWidth } from "./lanes";
@@ -34,7 +35,7 @@ export function cityPois(data: OsmData): Poi[] {
   for (const n of data.nodes.values()) {
     const kind = poiKind(n);
     if (!kind) continue;
-    const p: Poi = { id: n.id, pos: [n.lon, n.lat], kind, name: n.tags.name ?? "" };
+    const p: Poi = { id: n.id, pos: [n.lon, n.lat], kind, name: nameOf(n.tags) };
     if (kind === "tram" && n.tags.public_transport === "stop_position") stopPos.push(p); else out.push(p);
   }
   const platforms = out.filter((p) => p.kind === "tram");

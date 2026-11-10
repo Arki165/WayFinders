@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { tr } from "../i18n";
 
 // Полоска, за которую тянут край панели.
 // dir "x" - левый край правой панели, "y" - верхний край нижней панели.
@@ -45,7 +46,7 @@ export default function Resizer({ dir, value, min, max, onChange }: Props) {
     <div
       className={"resizer " + dir + (drag ? " drag" : "")}
       onMouseDown={onMouseDown}
-      title="Потяните, чтобы изменить размер"
+      title={tr("Потяните, чтобы изменить размер")}
     />
   );
 }

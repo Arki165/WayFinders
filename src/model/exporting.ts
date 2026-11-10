@@ -1,6 +1,7 @@
 // Выгрузка таблиц и картинок в файлы через Electron (или скачивание в браузере)
 import { useEditor } from "./store";
 import { makeXlsx, type Sheet } from "./xlsx";
+import { tr } from "../i18n";
 
 export function toCsv(header: (string | number)[], rows: (string | number | null)[][]): string {
   const cell = (v: string | number | null) => {
@@ -22,7 +23,7 @@ function browserDownload(name: string, blob: Blob) {
 export async function saveCsv(name: string, text: string) {
   if (window.api) {
     const p = await window.api.saveText(name, text, [{ name: "CSV", extensions: ["csv"] }]);
-    if (p) useEditor.getState().toast("Сохранено: " + p);
+    if (p) useEditor.getState().toast(tr("Сохранено: ") + p);
   } else browserDownload(name, new Blob([text], { type: "text/csv" }));
 }
 
@@ -36,7 +37,7 @@ export async function savePng(name: string, canvas: HTMLCanvasElement) {
   const url = canvas.toDataURL("image/png");
   if (window.api) {
     const p = await window.api.savePng(name, url.split(",")[1]);
-    if (p) useEditor.getState().toast("Сохранено: " + p);
+    if (p) useEditor.getState().toast(tr("Сохранено: ") + p);
   } else {
     const a = document.createElement("a");
     a.href = url;
@@ -57,7 +58,7 @@ export async function saveXlsx(name: string, sheets: Sheet[]) {
   const bytes = makeXlsx(sheets);
   if (window.api) {
     const p = await window.api.saveBinary(name, toBase64(bytes), [{ name: "Excel", extensions: ["xlsx"] }]);
-    if (p) useEditor.getState().toast("Сохранено: " + p);
+    if (p) useEditor.getState().toast(tr("Сохранено: ") + p);
   } else browserDownload(name, new Blob([bytes as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
 }
 
@@ -65,10 +66,10 @@ export async function saveXlsx(name: string, sheets: Sheet[]) {
 export async function savePdf(name: string, html: string) {
   if (window.api) {
     const p = await window.api.savePdf(name, html);
-    if (p) useEditor.getState().toast("Сохранено: " + p);
+    if (p) useEditor.getState().toast(tr("Сохранено: ") + p);
   } else {
     const w = window.open("", "_blank");
-    if (!w) return useEditor.getState().toast("Браузер не дал открыть окно печати");
+    if (!w) return useEditor.getState().toast(tr("Браузер не дал открыть окно печати"));
     w.document.write(html);
     w.document.close();
     w.onload = () => w.print();

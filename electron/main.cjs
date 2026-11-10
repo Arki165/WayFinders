@@ -6,6 +6,23 @@ const fs = require("fs");
 // Программа переименована в Wayfinder, но настройки и свои шаблоны лежат в старой папке WayFinders.
 // Оставляем старую папку, иначе после обновления шаблоны и тема пропадут.
 app.setPath("userData", path.join(app.getPath("appData"), "WayFinders"));
+// имя программы в меню и окнах «О программе», «Скрыть», «Выйти» (иначе в режиме разработки там «Electron»)
+app.setName("Wayfinder");
+
+// Windows: свой id приложения, тогда на панели задач окно с нашим значком, а не значком Electron
+if (process.platform === "win32") app.setAppUserModelId("ru.wayfinders.editor");
+
+// Наш значок: при разработке из public, в собранной программе из dist
+function iconPath() {
+  const dev = path.join(__dirname, "..", "public", "icon.png");
+  const built = path.join(__dirname, "..", "dist", "icon.png");
+  return process.env.VITE_DEV || !fs.existsSync(built) ? dev : built;
+}
+
+// значок в доке macOS: в режиме разработки иначе виден значок Electron
+function setDockIcon() {
+  if (process.platform === "darwin" && app.dock) app.dock.setIcon(iconPath());
+}
 
 function createWindow() {
   // окно не больше свободной части экрана (без панели задач),
@@ -18,7 +35,7 @@ function createWindow() {
     minHeight: Math.min(600, area.height),
     center: true,
     title: "Wayfinder",
-    icon: path.join(__dirname, "..", "dist", "icon.png"), // значок окна (на Windows и Linux)
+    icon: iconPath(), // значок окна и панели задач (Windows и Linux)
     backgroundColor: "#1a1f1c",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -115,6 +132,7 @@ function setOverpassUserAgent() {
 
 app.whenReady().then(() => {
   setOverpassUserAgent();
+  setDockIcon();
   createWindow();
 });
 app.on("window-all-closed", () => app.quit());
