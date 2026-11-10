@@ -35,3 +35,42 @@ export function project(p: [number, number], a: [number, number], b: [number, nu
   const q: [number, number] = [a[0] + t * dx, a[1] + t * dy];
   return { q, t, d: Math.hypot(q[0] - p[0], q[1] - p[1]) };
 }
+
+// Точки в [долгота, широта], как их рисует карта
+type LL = [number, number];
+
+// Дуга, которая плавно продолжает отрезок prev-last и приходит в точку to.
+// Возвращает промежуточные точки дуги (без концов), радиус и длину в метрах.
+// Если точка to лежит почти на продолжении отрезка или позади него, дуги нет: null.
+export function tangentArc(prev: LL, last: LL, to: LL): { pts: LL[]; radius: number; length: number } | null {
+  const kx = Math.cos(rad(last[1])) * 111320, ky = 110540;
+  // все считаем в метрах от точки last
+  let dx = (last[0] - prev[0]) * kx, dy = (last[1] - prev[1]) * ky;
+  const dl = Math.hypot(dx, dy);
+  if (dl < 0.5) return null;
+  dx /= dl; dy /= dl;
+  const vx = (to[0] - last[0]) * kx, vy = (to[1] - last[1]) * ky;
+  const cross = dx * vy - dy * vx, dot = dx * vx + dy * vy;
+  const sweep = 2 * Math.atan2(cross, dot); // угол поворота дуги: плюс - влево, минус - вправо
+  if (Math.abs(sweep) < rad(3) || Math.abs(sweep) > rad(200)) return null;
+  const R = (vx * vx + vy * vy) / (2 * cross); // радиус со знаком: центр слева или справа
+  const cx = -dy * R, cy = dx * R; // центр окружности
+  const steps = Math.min(24, Math.max(2, Math.ceil(Math.abs(sweep) / rad(10))));
+  const pts: LL[] = [];
+  for (let k = 1; k < steps; k++) {
+    const a = (sweep * k) / steps, cos = Math.cos(a), sin = Math.sin(a);
+    // поворачиваем точку last (она в нуле) вокруг центра
+    const x = cx + -cx * cos - -cy * sin, y = cy + -cx * sin + -cy * cos;
+    pts.push([last[0] + x / kx, last[1] + y / ky]);
+  }
+  return { pts, radius: Math.abs(R), length: Math.abs(R * sweep) };
+}
+
+// Угол поворота между отрезками a-b и b-c в градусах: 0 - прямо, 90 - поворот под прямым углом
+export function turnAngle(a: LL, b: LL, c: LL): number {
+  const k = Math.cos(rad(b[1]));
+  const a1 = Math.atan2(b[1] - a[1], (b[0] - a[0]) * k), a2 = Math.atan2(c[1] - b[1], (c[0] - b[0]) * k);
+  let d = Math.abs(a2 - a1) * (180 / Math.PI);
+  if (d > 180) d = 360 - d;
+  return d;
+}

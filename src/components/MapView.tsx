@@ -8,6 +8,7 @@ import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from 
 import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
+import { distM, tangentArc, turnAngle } from "../model/geo";
 import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
@@ -223,6 +224,7 @@ function shiftPath(path: [number, number][], off: number): [number, number][] {
 }
 
 type P3 = [number, number, number];
+const ll = (p: { lon: number; lat: number }): [number, number] => [p.lon, p.lat];
 // Цвет асфальта с оттенком класса дороги: на нем видна белая разметка
 const asphalt = (c: number[]): [number, number, number, number] => [c[0] * 0.35 + 105 * 0.65, c[1] * 0.35 + 108 * 0.65, c[2] * 0.35 + 104 * 0.65, c[3]];
 type RoadItem = { id: number; path: P3[]; color: [number, number, number, number]; width: number };
@@ -297,10 +299,11 @@ interface Props {
   drawTemplate: string;
   magnet: boolean; // точки новой линии прилипают к ближним узлам и дорогам
   dark: boolean;
+  drawArc?: boolean; // новая точка дороги соединяется с предыдущей дугой, а не прямой
   children?: ReactNode; // панель над картой под подсказкой (например, выбор шаблона новой дороги)
 }
 
-export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, magnet, dark, children }: Props) {
+export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, drawArc, magnet, dark, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -334,8 +337,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
 
   // актуальные значения для обработчиков событий карты
-  const live = useRef({ tool, draw, selection, drawTemplate, magnet, dark });
-  live.current = { tool, draw, selection, drawTemplate, magnet, dark };
+  const live = useRef({ tool, draw, selection, drawTemplate, drawArc, magnet, dark });
+  live.current = { tool, draw, selection, drawTemplate, drawArc, magnet, dark };
   // куда прилипнет точка под курсором при рисовании (кружок на карте)
   const [snapMark, setSnapMark] = useState<DrawPoint | null>(null);
 
@@ -593,8 +596,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // дорогу сквозь здание не рисуем: точка не ставится, программа объясняет почему
         const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
         const prev = live.current.draw;
-        if (lineHitsBuilding(prev.length ? [prev[prev.length - 1], pt] : [pt], tpl.tags)) return st.toast(tr(THROUGH_BUILDING));
-        setDraw((d) => [...d, pt]);
+        // режим «Дуга»: от прошлой точки к новой идет дуга, которая плавно продолжает предыдущий отрезок
+        const arc = live.current.drawArc && prev.length >= 2 ? tangentArc(ll(prev[prev.length - 2]), ll(prev[prev.length - 1]), ll(pt)) : null;
+        const mids: DrawPoint[] = (arc?.pts ?? []).map(([lon, lat]) => ({ id: null, lat, lon }));
+        if (lineHitsBuilding(prev.length ? [prev[prev.length - 1], ...mids, pt] : [pt], tpl.tags)) return st.toast(tr(THROUGH_BUILDING));
+        setDraw((d) => [...d, ...mids, pt]);
       } else if (t === "node") {
         if (nodeId !== null) { st.select({ kind: "node", id: nodeId }); return st.toast(tr("Здесь уже есть узел")); }
         if (wayId === null) return st.toast(tr("Кликните по линии дороги, туда встанет новый узел"));
@@ -942,7 +948,20 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const vertices: Pt[] = vertIds.filter((id) => data.nodes.has(id)).map((id) => { const n = data.nodes.get(id)!; return { id, pos: [n.lon, n.lat] as [number, number] }; });
     const nodes = showNodes && zoom >= 15.5 ? [...layersData.junctions, ...vertices] : vertices;
     const drawPath = draw.map((p) => [p.lon, p.lat] as [number, number]);
-    if (cursor && drawPath.length) drawPath.push(cursor);
+    // подпись у курсора при рисовании: длина нового отрезка и угол поворота, у дуги еще радиус
+    const drawLabel: { pos: [number, number]; text: string }[] = [];
+    if (cursor && drawPath.length) {
+      const last = drawPath[drawPath.length - 1], prev = drawPath[drawPath.length - 2];
+      const arc = drawArc && prev ? tangentArc(prev, last, cursor) : null;
+      const len = arc ? arc.length : distM(last[1], last[0], cursor[1], cursor[0]);
+      const m = (x: number) => (x < 100 ? x.toLocaleString(locale(), { maximumFractionDigits: 1 }) : Math.round(x).toLocaleString(locale()));
+      let text = tr("{0} м", m(len));
+      if (arc) text += " · " + tr("R {0} м", m(arc.radius));
+      else if (prev) text += " · " + Math.round(turnAngle(prev, last, cursor)) + "°";
+      if (len > 0.5) drawLabel.push({ pos: cursor, text });
+      if (arc) drawPath.push(...arc.pts);
+      drawPath.push(cursor);
+    }
 
     // ---------- уровень и фильтры слоев ----------
     // «Метро»: линии и станции ярко, город бледным фоном без значков. «Город»: метро тонко, все остальное как обычно.
@@ -1066,6 +1085,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new PathLayer({ id: "section", data: sectionPath.length > 1 ? [{ path: sectionPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 230], getWidth: 7, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer({ id: "draw", data: drawPath.length > 1 ? [{ path: drawPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 255], getWidth: 3, widthUnits: "pixels" }),
         new ScatterplotLayer({ id: "draw-pts", data: draw, getPosition: (d) => [d.lon, d.lat], getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 255] }),
+        new TextLayer<{ pos: [number, number]; text: string }>({ id: "draw-label", data: drawLabel, getPosition: (d) => d.pos, getText: (d) => d.text, getSize: 12, fontWeight: 700, characterSet: "auto", getColor: [255, 255, 255, 255], background: true, getBackgroundColor: [31, 111, 209, 235], backgroundPadding: [5, 3], getPixelOffset: [0, -22], getTextAnchor: "middle", getAlignmentBaseline: "center" }),
         // кольцо магнита: зеленое - прилипнет к узлу, синее - встанет на линию дороги новым общим узлом
         new ScatterplotLayer({ id: "snap", data: snapMark && tool === "draw" ? [snapMark] : [], getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: "pixels", filled: false, stroked: true, getLineWidth: 2.5, lineWidthUnits: "pixels", getLineColor: (d) => (d.id !== null ? [40, 170, 90, 255] : [31, 111, 209, 255]) }),
     ].map((l) => l.clone({ parameters: flat }));
@@ -1073,7 +1093,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
       layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers, ...handleLayers] : [buildingsLayer, ...groundLayers, ...pointLayers, ...handleLayers],
     });
-  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark, routeData, langId]);
+  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark, routeData, langId, drawArc]);
 
   const hint: Record<string, string> = {
     select: tr("Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого."),

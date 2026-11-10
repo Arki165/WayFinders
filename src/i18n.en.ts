@@ -884,4 +884,8 @@ export const EN: Record<string, string> = {
   "нет замера": "no count",
   "Ширина полосы - интенсивность, до {0} авт/ч. Дорог с замером: {1}": "Band width shows volume, up to {0} veh/h. Roads with counts: {1}",
   "Замеров пока нет: задайте интенсивность N в свойствах дороги": "No counts yet: set the volume N in the road properties",
+  "R {0} м": "R {0} m",
+  "Прямая": "Straight",
+  "Дуга": "Arc",
+  "Как соединять точки: прямыми отрезками или дугой, которая плавно продолжает предыдущий отрезок": "How points are joined: straight segments or an arc that smoothly continues the previous segment",
 };

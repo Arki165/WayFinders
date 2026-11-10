@@ -80,6 +80,7 @@ export default function App() {
   const [changesOn, setChangesOn] = useState(false);
   const [tpl, setTpl] = useState("secondary");
   // магнит при рисовании, выбор запоминается
+  const [arc, setArc] = useState(false); // рисование дороги дугами
   const [magnet, setMagnet] = useState(() => { try { return localStorage.getItem("magnet") !== "off"; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem("magnet", magnet ? "on" : "off"); } catch { /* хранилище недоступно */ } }, [magnet]);
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
@@ -279,9 +280,13 @@ export default function App() {
         </nav>
 
         <main className="center">
-          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} magnet={magnet} dark={theme === "dark"}>
+          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} drawArc={arc} magnet={magnet} dark={theme === "dark"}>
             {tool === "draw" && (
               <div className="optbar">{tr("Шаблон новой дороги:")}<select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
+                <div className="seg" title={tr("Как соединять точки: прямыми отрезками или дугой, которая плавно продолжает предыдущий отрезок")}>
+                  <button className={arc ? "" : "on"} onClick={() => setArc(false)}>{tr("Прямая")}</button>
+                  <button className={arc ? "on" : ""} onClick={() => setArc(true)}>{tr("Дуга")}</button>
+                </div>
                 <label className="check" title={tr("Точка прилипает к ближнему узлу или встает на линию дороги общим узлом")}><input type="checkbox" checked={magnet} onChange={(e) => setMagnet(e.target.checked)} />{tr("Магнит")}</label>
               </div>
             )}
