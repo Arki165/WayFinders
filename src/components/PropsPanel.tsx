@@ -3,7 +3,7 @@ import "./props.css";
 import {
   useEditor, reverseWay, deleteWay, deleteWays, deleteNode, setNodeTags, setWayTags, unjoinNode, patchSelection,
   makeRoundabout, makeUturn, makeTurn, insertBridge, setCrossing, removeCrossing, flipCrossing, crossingOf,
-  embeddedTram, setTramOnRoad, templateFromWays, insertTemplate,
+  embeddedTram, setTramOnRoad, templateFromWays, insertTemplate, extraCorners, cleanBuildingCorners,
 } from "../model/store";
 import {
   ROAD_CLASSES, CITY_CLASSES, CLASS_HINT, ROAD_CATEGORIES, CATEGORY_KEY, SURFACES, SIGNAL_KEYS, TRACKS,
@@ -300,7 +300,10 @@ function OtherPanel({ way }: { way: OsmWay }) {
           <span>около {fmt((parseFloat(t["building:levels"] ?? "") || 3) * 3)} м (3 м на этаж), так здание видно в 3D</span>
         </div>
       )}
-      {building && <p className="hint">Перенести здание: потяните его мышью. Угол: потяните белую точку, Shift+клик по ней убирает угол. Новый угол: нажмите на стену в любом месте (или на синюю точку посередине) и тяните, из нового угла можно сделать следующий. Здание нельзя поставить на дорогу. Удалить: корзина вверху панели или Delete. Новое здание: инструмент «Нарисовать» (W), шаблон «Здание».</p>}
+      {building && extraCorners(data, way).length > 0 && (
+        <div className="chips"><button onClick={() => cleanBuildingCorners(way.id)}>Убрать лишние углы ({extraCorners(data, way).length})</button></div>
+      )}
+      {building && <p className="hint">Перенести здание: потяните его мышью. Угол: потяните белую точку, Shift+клик по ней убирает угол, а угол, оставленный на прямой стене, убирается сам. Новый угол: нажмите на стену в любом месте (или на синюю точку посередине) и тяните, из нового угла можно сделать следующий. Здание нельзя поставить на дорогу. Удалить: корзина вверху панели или Delete. Новое здание: инструмент «Нарисовать» (W), шаблон «Здание».</p>}
       {isTrack(way) && (
         <div className="form">
           <span>Вид</span>

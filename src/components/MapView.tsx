@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, type DrawPoint, insertBuildingCorner, moveBuildingDone, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -277,7 +277,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [draw, setDraw] = useState<DrawPoint[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   // что тащим мышью: узел (id) или здание целиком (bld - его узлы и где они были, origin - точка, где нажали)
-  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] }; corner?: { wayId: number; index: number } } | null>(null);
+  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] }; corner?: { wayId: number; index: number }; newCorner?: { wayId: number; index: number } } | null>(null);
 
   const data = useEditor((s) => s.data);
   const original = useEditor((s) => s.original);
@@ -461,10 +461,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // узел начинает двигаться, только когда мышь ушла дальше нескольких пикселей: обычный клик его не сдвигает
         if (!dr.moved && Math.hypot(e.point.x - dr.start[0], e.point.y - dr.start[1]) < DRAG_START_PX) return;
         if (dr.corner) {
-          // мышь потянула от стены: вставляем новый угол и дальше тащим его как обычный узел
-          const id = insertBuildingCorner(dr.corner.wayId, dr.corner.index, dr.from[0], dr.from[1]);
+          // мышь потянула от стены: временный угол без истории, в историю он попадет, когда отпустим мышь
+          const b = st.data.ways.get(dr.corner.wayId);
+          if (!b) { dragRef.current = null; map.dragPan.enable(); return; }
+          const id = newId();
+          st.data.nodes.set(id, { id, lat: dr.from[0], lon: dr.from[1], tags: {}, attrs: {} });
+          b.nodeIds.splice(dr.corner.index, 0, id);
+          dr.newCorner = dr.corner;
           dr.corner = undefined;
-          if (id === null) { dragRef.current = null; map.dragPan.enable(); return; }
           dr.id = id;
         }
         if (dr.bld) {
@@ -490,6 +494,17 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       if (!dr) return;
       dragRef.current = null;
       map.dragPan.enable();
+      if (dr.newCorner) {
+        // убираем временный угол и записываем настоящий одним шагом (или ничего, если стену вернули на место)
+        const st = useEditor.getState(), d = st.data!, n = d.nodes.get(dr.id);
+        const b = d.ways.get(dr.newCorner.wayId);
+        if (b && n) {
+          b.nodeIds.splice(dr.newCorner.index, 1);
+          d.nodes.delete(dr.id);
+          addBuildingCorner(dr.newCorner.wayId, dr.newCorner.index, n.lat, n.lon);
+        }
+        return;
+      }
       if (dr.moved && dr.bld) moveBuildingDone(dr.bld.wayId, dr.bld.from);
       else if (dr.moved) moveNodeDone(dr.id, dr.from);
     });

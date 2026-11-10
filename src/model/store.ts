@@ -209,8 +209,70 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
   const onRoad = buildingsOf(d, [nodeId]).some((b) => roadThroughBuilding(d, b));
   n.lat = from[0]; n.lon = from[1];
   if (onRoad) { ed().bump(); return ed().toast(BUILDING_ON_ROAD); }
-  const corner = buildingsOf(d, [nodeId]).length > 0;
-  ed().run(corner ? "Угол здания" : "Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
+  const blds = buildingsOf(d, [nodeId]);
+  if (!blds.length) { ed().run("Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; }); return; }
+  // угол здания: после переноса убираем углы, которые легли на прямую стену или на соседний угол
+  let removed: number[] = [];
+  ed().run("Угол здания", blds.map((b) => b.id), [...new Set(blds.flatMap((b) => b.nodeIds))], () => {
+    n.lat = to[0]; n.lon = to[1];
+    for (const b of blds) removed.push(...cleanBuilding(d, b));
+  });
+  if (removed.length) ed().toast(removed.includes(nodeId) ? "Угол лег на прямую стену и убран" : "Лишние углы на прямой стене убраны");
+  removed = [];
+}
+
+// ---------- лишние углы здания ----------
+const CORNER_TOL_M = 0.5; // угол ближе полуметра к прямой между соседями - лишний
+
+// Углы здания, без которых форма не меняется: лежат на прямой между соседями или совпадают с соседом.
+// Углы, общие с другой линией (соседний дом, забор) или с тегами (вход), не трогаем.
+export function extraCorners(d: OsmData, b: OsmWay): number[] {
+  const ring = b.nodeIds.slice(0, -1);
+  const lat0 = d.nodes.get(ring[0])?.lat ?? 0;
+  const kx = Math.cos((lat0 * Math.PI) / 180) * 111320, ky = 111320;
+  const xy = (id: number): [number, number] => { const p = d.nodes.get(id)!; return [p.lon * kx, p.lat * ky]; };
+  const used = new Set<number>();
+  for (const w of d.ways.values()) if (w.id !== b.id) for (const id of w.nodeIds) used.add(id);
+  const out: number[] = [];
+  const left = [...ring];
+  // убираем по одному и проверяем заново: после удаления соседи меняются
+  for (let changed = true; changed && left.length > 3; ) {
+    changed = false;
+    for (let i = 0; i < left.length && left.length > 3; i++) {
+      const id = left[i], node = d.nodes.get(id);
+      if (!node || used.has(id) || Object.keys(node.tags).length) continue;
+      const a = xy(left[(i - 1 + left.length) % left.length]), p = xy(id), c = xy(left[(i + 1) % left.length]);
+      const vx = c[0] - a[0], vy = c[1] - a[1], L = Math.hypot(vx, vy);
+      const toLine = L ? Math.abs((p[0] - a[0]) * vy - (p[1] - a[1]) * vx) / L : 0;
+      const t = L ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / (L * L) : 0;
+      const nearNeighbor = Math.hypot(p[0] - a[0], p[1] - a[1]) < CORNER_TOL_M || Math.hypot(p[0] - c[0], p[1] - c[1]) < CORNER_TOL_M;
+      // на прямой и между соседями (не «шип» назад), или вплотную к соседнему углу
+      if (nearNeighbor || (toLine < CORNER_TOL_M && t > 0 && t < 1)) { out.push(id); left.splice(i, 1); changed = true; i--; }
+    }
+  }
+  return out;
+}
+
+// Убрать лишние углы прямо в данных (вызывать внутри run). Возвращает убранные узлы
+function cleanBuilding(d: OsmData, b: OsmWay): number[] {
+  const extra = extraCorners(d, b);
+  if (!extra.length) return [];
+  const drop = new Set(extra);
+  const ring = b.nodeIds.slice(0, -1).filter((id) => !drop.has(id));
+  b.nodeIds = [...ring, ring[0]];
+  for (const id of extra) d.nodes.delete(id);
+  return extra;
+}
+
+// Кнопка «Убрать лишние углы» в панели здания
+export function cleanBuildingCorners(wayId: number) {
+  const d = ed().data!;
+  const b = d.ways.get(wayId);
+  if (!b) return;
+  const n = extraCorners(d, b).length;
+  if (!n) return ed().toast("Лишних углов нет");
+  ed().run("Лишние углы здания убраны", [wayId], [...b.nodeIds], () => { cleanBuilding(d, b); });
+  ed().toast(`Убрано углов: ${n}`);
 }
 
 // ---------- маршруты (отношения OSM) ----------
@@ -301,16 +363,27 @@ export function moveBuildingDone(wayId: number, from: Map<number, [number, numbe
 }
 
 // Новый угол здания между углами index-1 и index (точка на стене). Возвращает id нового узла
-export function insertBuildingCorner(wayId: number, index: number, lat: number, lon: number): number | null {
+// Новый угол, вытянутый из стены: пока мышь тянет, угол временный (без истории),
+// а когда отпустили - записываем одним шагом. Если угол остался на прямой стене, его просто нет.
+export function addBuildingCorner(wayId: number, index: number, lat: number, lon: number) {
   const d = ed().data!;
   const b = d.ways.get(wayId);
-  if (!b || index < 1 || index >= b.nodeIds.length) return null;
+  if (!b || index < 1 || index >= b.nodeIds.length) return;
   const id = newId();
-  ed().run("Новый угол здания", [wayId], [], () => {
+  // проверка дороги: временно ставим угол и смотрим, не наехало ли здание на дорогу
+  d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
+  b.nodeIds.splice(index, 0, id);
+  const extra = extraCorners(d, b).includes(id);
+  const onRoad = !extra && roadThroughBuilding(d, b);
+  b.nodeIds.splice(index, 1);
+  d.nodes.delete(id);
+  if (extra) { ed().bump(); return; } // стену вернули на место - ничего не меняем
+  if (onRoad) { ed().bump(); return ed().toast(BUILDING_ON_ROAD); }
+  ed().run("Новый угол здания", [wayId], [...b.nodeIds], () => {
     d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
     b.nodeIds.splice(index, 0, id);
+    cleanBuilding(d, b);
   });
-  return id;
 }
 
 // Убрать угол здания (Shift+клик по углу). Меньше трех углов не бывает
