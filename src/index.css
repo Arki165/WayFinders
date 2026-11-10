@@ -467,3 +467,10 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .layers-row { display: flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; }
 .layers-row img { width: 16px; height: 16px; }
 .layers-row i { width: 16px; height: 5px; border-radius: 3px; display: inline-block; }
+
+/* меню «Скачать» у графика */
+.save-menu { position: relative; display: inline-flex; }
+.save-list { position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 230px; display: grid; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.save-list button { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; width: 100%; height: auto; padding: 6px 10px; border: 0; background: none; text-align: left; border-radius: 6px; cursor: pointer; color: var(--fg); }
+.save-list button:hover { background: var(--panel-3); }
+.save-list small { color: var(--muted); font-size: 11px; }

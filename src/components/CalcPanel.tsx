@@ -3,7 +3,8 @@ import { Chart, registerables } from "chart.js";
 import { useEditor, setWayTags } from "../model/store";
 import { calcWay, DEFAULT_NORMS, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
-import { saveCsv, savePng, toCsv } from "../model/exporting";
+import { saveCsv, savePdf, savePng, saveXlsx, toCsv } from "../model/exporting";
+import type { Cell } from "../model/xlsx";
 import { flowCurve, flowPoint, FLOW_AXES, FLOW_SHORT, FLOW_TITLES, type FlowKind } from "../model/flow";
 import Icon from "./Icon";
 
@@ -149,11 +150,62 @@ export default function CalcPanel() {
     if (v.trim() === "") delete tags[key]; else tags[key] = String(Number(v.replace(",", ".")));
     setWayTags(id, tags, key === MEASURE_KEYS.volume ? "Замер N" : "Замер T факт");
   };
-  const exportCsv = () => {
-    const header = ["way id", "Дорога", "L, км", "V max, км/ч", "k покрытия", "V своб, км/ч", "T своб, мин", "Полос", "P, авт/ч", "N, авт/ч", "T факт, мин", "Z", "Загрузка", "V ср, км/ч", "q, авт/км", "T зад, мин", "D, %"];
+  // Таблица расчета для выгрузки: заголовок и строки (одна и та же для CSV, Excel и PDF)
+  const TABLE_HEAD = ["way id", "Дорога", "L, км", "V max, км/ч", "k покрытия", "V своб, км/ч", "T своб, мин", "Полос", "P, авт/ч", "N, авт/ч", "T факт, мин", "Z", "Загрузка", "V ср, км/ч", "q, авт/км", "T зад, мин", "D, %"];
+  const tableRows = (): Cell[][] => {
     const r = (x: number | null, n: number) => (x === null || !isFinite(x) ? null : +x.toFixed(n));
-    saveCsv(fileName.replace(/\.osm$/i, "") + "_calc.csv", toCsv(header, rows.map(({ id, name, c }) => [id, name, r(c.L, 3), c.Vmax, c.kSurface, r(c.Vfree, 1), r(c.Tfree, 2), c.lanes, c.P, c.N, c.Tfact, r(c.Z, 2), c.Z === null ? "" : Z_TEXT[zLevel(c.Z, norms)], r(c.Vavg, 1), r(c.q, 1), r(c.Tdelay, 2), r(c.D, 0)])));
+    return rows.map(({ id, name, c }) => [id, name, r(c.L, 3), c.Vmax, c.kSurface, r(c.Vfree, 1), r(c.Tfree, 2), c.lanes, c.P, c.N, c.Tfact, r(c.Z, 2), c.Z === null ? "" : Z_TEXT[zLevel(c.Z, norms)], r(c.Vavg, 1), r(c.q, 1), r(c.Tdelay, 2), r(c.D, 0)]);
   };
+  const base = () => fileName.replace(/\.osm$/i, "");
+  const exportCsv = () => saveCsv(base() + "_calc.csv", toCsv(TABLE_HEAD, tableRows()));
+  const exportXlsx = () => saveXlsx(base() + "_calc.xlsx", [{ name: "Расчет", rows: [TABLE_HEAD, ...tableRows()] }, ...(chart.current ? [{ name: "График", rows: chartRows() }] : [])]);
+
+  // Числа текущего графика: у столбиков - участок и значения рядов, у диаграмм - точки x, y каждого ряда
+  const chartTitle = () => String((chart.current?.options.plugins?.title as { text?: string } | undefined)?.text ?? "График");
+  const chartRows = (): Cell[][] => {
+    const ch = chart.current;
+    if (!ch) return [];
+    const r = (x: unknown) => (typeof x === "number" && isFinite(x) ? +x.toFixed(3) : null);
+    const sets = ch.data.datasets;
+    if (ch.data.labels?.length) {
+      return [["Участок", ...sets.map((d) => d.label ?? "")], ...ch.data.labels.map((l, i) => [String(l), ...sets.map((d) => r(d.data[i]))])];
+    }
+    const [ax, ay] = isFlow(kind) ? FLOW_AXES[kind] : ["x", "y"];
+    const out: Cell[][] = [["Ряд", ax, ay]];
+    for (const d of sets) for (const p of d.data as { x: number; y: number }[]) out.push([d.label ?? "", r(p.x), r(p.y)]);
+    return out;
+  };
+  const exportChartXlsx = () => saveXlsx(base() + `_${kind}.xlsx`, [{ name: "График", rows: chartRows() }, { name: "Расчет", rows: [TABLE_HEAD, ...tableRows()] }]);
+
+  // PDF: заголовок, картинка графика и таблица расчета на листе A4 альбомом
+  const exportPdf = () => {
+    const cv = canvas.current;
+    if (!cv) return;
+    // фон под графиком цвета панели: в темной теме подписи светлые и на белом не видны
+    const bg = document.createElement("canvas");
+    bg.width = cv.width; bg.height = cv.height;
+    const g = bg.getContext("2d")!;
+    g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--panel").trim() || "#fff";
+    g.fillRect(0, 0, bg.width, bg.height);
+    g.drawImage(cv, 0, 0);
+    const esc = (x: Cell) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const num = (x: Cell) => (typeof x === "number" ? x.toLocaleString("ru-RU") : esc(x));
+    const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(chartTitle())}</title><style>
+      body { font: 11px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1d2125; margin: 0; }
+      h1 { font-size: 17px; margin: 0 0 2px; } .sub { color: #6b7178; margin-bottom: 12px; }
+      img { display: block; max-width: 100%; max-height: 90mm; margin: 0 auto 14px; border-radius: 6px; }
+      table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #d5d8dc; padding: 3px 5px; text-align: right; }
+      th { background: #eef0f2; font-weight: 600; } td:nth-child(2), th:nth-child(2) { text-align: left; } tr { page-break-inside: avoid; }
+    </style></head><body>
+      <h1>${esc(chartTitle())}</h1>
+      <div class="sub">Wayfinder · ${esc(fileName)} · ${new Date().toLocaleString("ru-RU")} · участков: ${rows.length}</div>
+      <img src="${bg.toDataURL("image/png")}">
+      <table><thead><tr>${TABLE_HEAD.slice(1).map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+      <tbody>${tableRows().map((r) => `<tr>${r.slice(1).map((x) => `<td>${num(x)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    </body></html>`;
+    savePdf(base() + `_${kind}.pdf`, html);
+  };
+  const [saveMenu, setSaveMenu] = useState(false);
 
   return (
     <div className="calc">
@@ -163,7 +215,8 @@ export default function CalcPanel() {
           {selMany.length > 0 && <button className="on" onClick={() => setAnalysis([...analysis, ...selMany])}><Icon name="plus" size={14} />Выделенные: {selMany.length}</button>}
           <button onClick={addMajor}><Icon name="plus" size={14} />Все крупные улицы</button>
           {rows.length > 0 && <button onClick={() => setAnalysis([])}>Очистить</button>}
-          <button onClick={exportCsv} disabled={!rows.length}><Icon name="download" size={14} />CSV</button>
+          <button onClick={exportCsv} disabled={!rows.length} title="Таблица для Excel и других программ"><Icon name="download" size={14} />CSV</button>
+          <button onClick={exportXlsx} disabled={!rows.length} title="Таблица Excel: лист «Расчет» и лист «График» с числами графика"><Icon name="download" size={14} />Excel</button>
           <button className={showNorms ? "on" : ""} onClick={() => setShowNorms(!showNorms)}>Нормативы</button>
         </div>
         {showNorms ? <NormsEditor /> : (
@@ -210,7 +263,17 @@ export default function CalcPanel() {
             <option value="">Диаграммы потока...</option>
             {FLOW_KINDS.map((k) => <option key={k} value={k}>{FLOW_SHORT[k]}: {FLOW_TITLES[k].split(": ").pop()}</option>)}
           </select>
-          <button disabled={!rows.length} onClick={() => canvas.current && savePng(fileName.replace(/\.osm$/i, "") + `_${kind}.png`, canvas.current)}><Icon name="download" size={14} />PNG</button>
+          {/* сохранить график: картинка, PDF с таблицей или числа графика в Excel */}
+          <div className="save-menu">
+            <button disabled={!rows.length} className={saveMenu ? "on" : ""} onClick={() => setSaveMenu(!saveMenu)} onBlur={() => setTimeout(() => setSaveMenu(false), 150)} title="Сохранить график"><Icon name="download" size={14} />Скачать<Icon name="chevronDown" size={12} /></button>
+            {saveMenu && (
+              <div className="save-list" onMouseDown={(e) => e.preventDefault()}>
+                <button onClick={() => { setSaveMenu(false); if (canvas.current) savePng(base() + `_${kind}.png`, canvas.current); }}><b>PNG</b><small>картинка графика</small></button>
+                <button onClick={() => { setSaveMenu(false); exportPdf(); }}><b>PDF</b><small>график и таблица на листе A4</small></button>
+                <button onClick={() => { setSaveMenu(false); exportChartXlsx(); }}><b>Excel</b><small>числа графика и таблица расчета</small></button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="chart-box"><canvas ref={canvas} />{!rows.length && <p className="hint center">Здесь будет график по участкам из таблицы</p>}</div>
       </div>

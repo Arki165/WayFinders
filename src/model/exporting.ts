@@ -1,5 +1,6 @@
 // Выгрузка таблиц и картинок в файлы через Electron (или скачивание в браузере)
 import { useEditor } from "./store";
+import { makeXlsx, type Sheet } from "./xlsx";
 
 export function toCsv(header: (string | number)[], rows: (string | number | null)[][]): string {
   const cell = (v: string | number | null) => {
@@ -41,5 +42,35 @@ export async function savePng(name: string, canvas: HTMLCanvasElement) {
     a.href = url;
     a.download = name;
     a.click();
+  }
+}
+
+// Байты в base64 кусками: весь файл одной строкой браузер может не переварить
+function toBase64(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// Таблица Excel: листы собирает makeXlsx в xlsx.ts
+export async function saveXlsx(name: string, sheets: Sheet[]) {
+  const bytes = makeXlsx(sheets);
+  if (window.api) {
+    const p = await window.api.saveBinary(name, toBase64(bytes), [{ name: "Excel", extensions: ["xlsx"] }]);
+    if (p) useEditor.getState().toast("Сохранено: " + p);
+  } else browserDownload(name, new Blob([bytes as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+}
+
+// PDF из готовой страницы html. В программе печатает Electron, в браузере открывается окно печати
+export async function savePdf(name: string, html: string) {
+  if (window.api) {
+    const p = await window.api.savePdf(name, html);
+    if (p) useEditor.getState().toast("Сохранено: " + p);
+  } else {
+    const w = window.open("", "_blank");
+    if (!w) return useEditor.getState().toast("Браузер не дал открыть окно печати");
+    w.document.write(html);
+    w.document.close();
+    w.onload = () => w.print();
   }
 }

@@ -67,6 +67,29 @@ ipcMain.handle("save-png", async (_e, { defaultName, base64 }) => {
   return res.filePath;
 });
 
+// Сохранить двоичный файл (например, таблицу Excel), data приходит как base64
+ipcMain.handle("save-binary", async (_e, { defaultName, base64, filters }) => {
+  const res = await dialog.showSaveDialog({ defaultPath: defaultName, filters });
+  if (res.canceled || !res.filePath) return null;
+  fs.writeFileSync(res.filePath, Buffer.from(base64, "base64"));
+  return res.filePath;
+});
+
+// Сохранить PDF: страницу html открываем в скрытом окне и печатаем в PDF средствами Electron
+ipcMain.handle("save-pdf", async (_e, { defaultName, html }) => {
+  const res = await dialog.showSaveDialog({ defaultPath: defaultName, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+  if (res.canceled || !res.filePath) return null;
+  const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+  try {
+    await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    const pdf = await win.webContents.printToPDF({ landscape: true, printBackground: true, pageSize: "A4", margins: { marginType: "default" } });
+    fs.writeFileSync(res.filePath, pdf);
+  } finally {
+    win.destroy();
+  }
+  return res.filePath;
+});
+
 // Встроенный пример example.osm (участок Иркутска от организаторов)
 ipcMain.handle("read-example", async () => {
   const p = process.env.VITE_DEV ? path.join(__dirname, "..", "public", "example.osm") : path.join(__dirname, "..", "dist", "example.osm");
