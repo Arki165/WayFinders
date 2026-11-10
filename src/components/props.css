@@ -68,3 +68,9 @@
 .sum-top button { justify-content: flex-start; gap: 8px; width: 100%; padding: 0 8px; text-align: left; }
 .sum-top .sum-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sum-top small { color: var(--muted); }
+
+/* зона пешей доступности у остановки */
+.walk-zone h3 { margin: 0 0 6px; }
+.walk-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.walk-row i { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgb(31, 111, 209); background: rgba(31, 111, 209, 0.18); }
+.walk-zone .hint { margin: 6px 0 0; }

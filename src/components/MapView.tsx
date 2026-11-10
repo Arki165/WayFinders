@@ -12,7 +12,7 @@ import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
 import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
-import { cityPois, isMetroWay, metroLineCount, metroLines, zebras, type Poi, type PoiKind } from "../model/poi";
+import { cityPois, isMetroWay, metroLineCount, metroLines, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
 
 const POI_TEXT: Record<PoiKind, string> = { crossing: "Пешеходный переход", bus: "Автобусная остановка", tram: "Трамвайная остановка", train: "Ж/д станция или платформа", metro: "Станция метро", entrance: "Вход в метро" };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
@@ -856,7 +856,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new PathLayer({ id: "metro", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: (d) => [...d.color, 255] as Rgba, getWidth: 6, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new IconLayer({ id: "arrows", data: zoom >= 16 && city && show.roads ? layersData.arrows : [], getPosition: (d) => d.pos, getIcon: () => ARROW_ICON, getAngle: (d) => d.angle, getSize: 12, sizeUnits: "pixels", getColor: dark ? [225, 230, 236, 230] : [40, 44, 50, 220], billboard: false }),
     ].map((l) => l.clone({ parameters: flat }));
+    // круг пешей доступности у выбранной остановки: 350 м автобус и троллейбус, 500 м трамвай
+    const stopNode = selNode !== null ? data?.nodes.get(selNode) : undefined;
+    const walkR = stopNode ? walkRadius(stopNode) : null;
     const pointLayers = [
+        new ScatterplotLayer({ id: "walk-zone", data: stopNode && walkR ? [{ pos: [stopNode.lon, stopNode.lat], r: walkR }] : [], getPosition: (d) => d.pos as [number, number], getRadius: (d) => d.r, radiusUnits: "meters", filled: true, stroked: true, getFillColor: [31, 111, 209, dark ? 40 : 34], getLineColor: [31, 111, 209, 200], getLineWidth: 2, lineWidthUnits: "pixels", parameters: flat }),
         new ScatterplotLayer<Pt>({ id: "nodes", data: nodes, getPosition: (d) => d.pos, getRadius: (d) => (d.id === selNode ? 6 : 3.5), radiusUnits: "pixels", getFillColor: (d) => (d.id === selNode ? [31, 111, 209, 255] : [255, 255, 255, 255]), getLineColor: [31, 111, 209, 255], stroked: true, lineWidthMinPixels: 1.5, pickable: true, updateTriggers: { getRadius: selNode, getFillColor: selNode } }),
         // светофоры: с линейки 100 м значком, дальше красной точкой
         iconsOn

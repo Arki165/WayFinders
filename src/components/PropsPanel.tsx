@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import "./props.css";
 import {
   useEditor, reverseWay, deleteWay, deleteWays, deleteNode, setNodeTags, setWayTags, unjoinNode, patchSelection,
@@ -9,7 +9,8 @@ import {
   ROAD_CLASSES, CITY_CLASSES, CLASS_HINT, ROAD_CATEGORIES, CATEGORY_KEY, SURFACES, SIGNAL_KEYS, TRACKS,
   isDrivable, isSignalTagged, isTrack, lanesOf, maxSpeed, nodeArms, phaseKey, sideRu, sideOf, azimuth, surfaceName, wayName, type Arm,
 } from "../model/roads";
-import { wayLengthM } from "../model/geo";
+import { distM, wayLengthM } from "../model/geo";
+import { poiKind, walkRadius } from "../model/poi";
 import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } from "../model/templates";
 import { calcWay, capacityPerLane, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { getMapBounds } from "./MapView";
@@ -333,6 +334,34 @@ function areaM2(data: { nodes: Map<number, OsmNode> }, w: OsmWay): number {
 const SIDE_NOM: Record<string, string> = { N: "Север", NE: "Северо-восток", E: "Восток", SE: "Юго-восток", S: "Юг", SW: "Юго-запад", W: "Запад", NW: "Северо-запад" };
 const SIDE_ADJ: Record<string, string> = { N: "северной", NE: "северо-восточной", E: "восточной", SE: "юго-восточной", S: "южной", SW: "юго-западной", W: "западной", NW: "северо-западной" };
 
+// Остановка: зона пешей доступности (круг на карте) и сколько домов в нее попадает
+function WalkZone({ node }: { node: OsmNode }) {
+  const data = useEditor((s) => s.data)!;
+  const version = useEditor((s) => s.version);
+  const r = walkRadius(node);
+  const kind = poiKind(node);
+  // дома в зоне: центр контура здания ближе радиуса
+  const houses = useMemo(() => {
+    if (!r) return 0;
+    let n = 0;
+    for (const w of data.ways.values()) {
+      if (!w.tags.building || w.tags.building === "no") continue;
+      let lat = 0, lon = 0, c = 0;
+      for (const id of w.nodeIds) { const p = data.nodes.get(id); if (p) { lat += p.lat; lon += p.lon; c++; } }
+      if (c && distM(node.lat, node.lon, lat / c, lon / c) <= r) n++;
+    }
+    return n;
+  }, [data, version, node.id, r]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!r) return null;
+  return (
+    <div className="walk-zone">
+      <h3>Пешая доступность</h3>
+      <div className="walk-row"><i /><span>Зона пешей доступности: <b>{r} м</b></span></div>
+      <p className="hint">Круг на карте: столько обычно проходят до остановки пешком ({kind === "tram" ? "норматив для трамвая 400-600 м" : "норматив для автобуса и троллейбуса 300-400 м"}, взято среднее). Домов в зоне: {houses}{houses === 0 ? " (здания не загружены или их нет рядом)" : ""}.</p>
+    </div>
+  );
+}
+
 function NodePanel({ node }: { node: OsmNode }) {
   const data = useEditor((s) => s.data)!;
   const select = useEditor((s) => s.select);
@@ -344,18 +373,19 @@ function NodePanel({ node }: { node: OsmNode }) {
   const isSignal = isSignalTagged(node);
   const arms = onRoad ? nodeArms(data, node.id) : [];
   const change = (patch: Tags, label: string, remove: string[] = []) => setNodeTags(node.id, patched(t, patch, remove), label);
+  const stop = walkRadius(node) !== null; // остановка автобуса, троллейбуса или трамвая
   const isEnd = roads.length === 1 && (roads[0].nodeIds[0] === node.id || roads[0].nodeIds[roads[0].nodeIds.length - 1] === node.id);
 
   return (
     <div className="pane">
       <div>
         <Head actions={<button className="icon-btn danger" onClick={() => deleteNode(node.id)} title="Удалить узел (Delete)"><Icon name="trash" size={16} /></button>}>
-          <div className="title-input">{roads.length >= 3 ? `Перекресток, ${roads.length} дорог` : roads.length === 2 ? "Стык двух дорог" : roads.length === 1 ? (isEnd ? "Конец дороги" : "Узел дороги") : "Отдельная точка"}</div>
+          <div className="title-input">{roads.length >= 3 ? `Перекресток, ${roads.length} дорог` : roads.length === 2 ? "Стык двух дорог" : roads.length === 1 ? (isEnd ? "Конец дороги" : "Узел дороги") : stop ? `${poiKind(node) === "tram" ? "Трамвайная остановка" : "Остановка"}${t.name ? ` «${t.name}»` : ""}` : "Отдельная точка"}</div>
         </Head>
         <div className="sub">Узел {node.id} · {node.lat.toFixed(6)}, {node.lon.toFixed(6)}</div>
       </div>
 
-      <div className="switch">
+      {(onRoad || isSignal) && <div className="switch">
         <span>Светофор</span>
         <button className={isSignal ? "on" : ""} disabled={!onRoad && !isSignal} onClick={() => {
           // переход в этом узле остается: без светофора нерегулируемый, со светофором регулируемый
@@ -364,8 +394,9 @@ function NodePanel({ node }: { node: OsmNode }) {
           if (isSignal) change(cross ? { highway: "crossing", crossing: "uncontrolled" } : {}, "Светофор убран", [...(!cross && t.highway === "traffic_signals" ? ["highway"] : []), ...phases]);
           else change({ highway: "traffic_signals", ...(cross ? { crossing: "traffic_signals" } : {}) }, "Светофор добавлен");
         }}>{isSignal ? "Есть" : "Нет"}</button>
-      </div>
-      {!onRoad && <p className="hint">Узел не лежит на проезжей дороге: светофор здесь не учитывается (например, железнодорожный сигнал).</p>}
+      </div>}
+      <WalkZone node={node} />
+      {!onRoad && isSignal && <p className="hint">Узел не лежит на проезжей дороге: светофор здесь не учитывается (например, железнодорожный сигнал).</p>}
       {isSignal && onRoad && <SignalBox node={node} arms={arms.filter((a) => a.incoming)} change={change} />}
 
       {onRoad && <CrossingBox node={node} arms={arms} isSignal={isSignal} />}

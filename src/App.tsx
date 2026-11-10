@@ -60,8 +60,10 @@ export default function App() {
   const [side, setSide] = useState<"props" | "errors" | "history" | null>(saved.side === undefined ? "props" : saved.side);
   const [bottom, setBottom] = useState<"calc" | "compare" | "formulas" | null>(saved.bottom === undefined ? "calc" : saved.bottom);
   // размеры панелей в пикселях, меняются перетаскиванием края
-  const [sideWidth, setSideWidth] = useState(Math.min(saved.sideWidth ?? 360, Math.round(window.innerWidth * 0.6)));
-  const [bottomHeight, setBottomHeight] = useState(Math.min(saved.bottomHeight ?? 320, window.innerHeight - 250));
+  // размеры панелей не меньше рабочего минимума: если окно открылось свернутым (ширина 0),
+  // раньше запоминалась панель шириной 0 и пропадала насовсем
+  const [sideWidth, setSideWidth] = useState(Math.max(280, Math.min(saved.sideWidth ?? 360, Math.round(window.innerWidth * 0.6))));
+  const [bottomHeight, setBottomHeight] = useState(Math.max(150, Math.min(saved.bottomHeight ?? 320, window.innerHeight - 250)));
   const [basemap, setBasemap] = useState<Basemap>(saved.basemap ?? "map");
   const [view3d, setView3d] = useState(false);
   const [heat, setHeat] = useState(false);

@@ -26,7 +26,7 @@ export default function Resizer({ dir, value, min, max, onChange }: Props) {
     function onMove(ev: MouseEvent) {
       const now = dir === "x" ? ev.clientX : ev.clientY;
       const next = startValue + (start - now);
-      onChange(Math.min(max, Math.max(min, next)));
+      onChange(Math.max(min, Math.min(max, next))); // на очень маленьком окне минимум важнее максимума
     }
 
     function onUp() {

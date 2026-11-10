@@ -127,3 +127,12 @@ export function zebras(data: OsmData, pois: Poi[]): [number, number][][] {
   }
   return out;
 }
+
+// Зона пешей доступности остановки: среднее из норматива (автобус и троллейбус 300-400 м, трамвай 400-600 м)
+export const WALK_RADIUS: Partial<Record<PoiKind, number>> = { bus: 350, tram: 500 };
+
+// Радиус зоны для узла-остановки или null, если узел не остановка
+export function walkRadius(n: OsmNode): number | null {
+  const k = poiKind(n);
+  return k ? WALK_RADIUS[k] ?? null : null;
+}
