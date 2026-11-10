@@ -8,7 +8,7 @@ import ComparePanel from "./components/ComparePanel";
 import FormulasPanel from "./components/FormulasPanel";
 import Resizer from "./components/Resizer";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
-import { useEditor, deleteNode, deleteWay, reverseWay, type Tool } from "./model/store";
+import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
@@ -125,7 +125,7 @@ export default function App() {
       if (mod && (k === "y" || k === "н")) { e.preventDefault(); return st.getState().redo(); }
       if (mod || e.altKey) return;
       const sel = st.getState().selection;
-      if ((k === "delete" || k === "backspace") && sel) { e.preventDefault(); return sel.kind === "way" ? deleteWay(sel.id) : deleteNode(sel.id); }
+      if ((k === "delete" || k === "backspace") && sel) { e.preventDefault(); return sel.kind === "way" ? deleteWay(sel.id) : sel.kind === "node" ? deleteNode(sel.id) : deleteWays(sel.ids); }
       if ((k === "r" || k === "к") && sel?.kind === "way") return reverseWay(sel.id);
       if (k === "escape") { st.getState().select(null); st.getState().setHighlight([]); return setTool("select"); }
       if (k === "3") return setView3d((v) => !v);

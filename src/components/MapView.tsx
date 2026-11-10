@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, setNodeTags, splitWay, unjoinNode } from "../model/store";
+import { useEditor, addWay, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, lanesOf, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -114,7 +114,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // ---------- создание карты ----------
   useEffect(() => {
     if (!box.current) return;
-    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, maxPitch: 70, doubleClickZoom: false });
+    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, maxPitch: 70, doubleClickZoom: false, boxZoom: false }); // Shift+клик нужен для выделения, рамка приближения его перехватывала
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
@@ -127,7 +127,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pick = (x: number, y: number, layerIds?: string[]) => overlay.pickObject({ x, y, radius: 6, layerIds });
 
     map.on("mousedown", (e) => {
-      if (live.current.tool !== "select") return;
+      // с Shift узел не таскаем: Shift+клик выделяет участок между узлами
+      if (live.current.tool !== "select" || e.originalEvent.shiftKey) return;
       // при сильном отдалении узлы не таскаем: 1 пиксель там - километры, дрожание мыши уносило узел в другой город
       if (map.getZoom() < DRAG_MIN_ZOOM) return;
       const info = pick(e.point.x, e.point.y, ["nodes", "signals"]);
@@ -167,7 +168,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // узел под курсором важнее круга ошибки вокруг него: иначе узел разорванного перекрестка не выбрать;
       // в инструментах правки круги ошибок вообще не перехватывают клики
       const onNode = pick(e.point.x, e.point.y, ["nodes", "signals"]);
-      const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, ["roads"]);
+      const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, ["roads", "others", "crossings"]);
       const layer = info?.layer?.id;
       const obj = info?.object as (RoadItem & Pt & { key: string }) | undefined;
       if (layer === "errors" && obj) {
@@ -176,7 +177,16 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         return;
       }
       const nodeId = layer === "nodes" || layer === "signals" ? obj!.id : null;
-      const wayId = layer === "roads" ? obj!.id : null;
+      const wayId = layer === "roads" || layer === "others" || layer === "crossings" ? obj!.id : null;
+      const shift = (e.originalEvent as MouseEvent).shiftKey;
+      if (t === "select" && shift) {
+        // Shift+клик: дорога добавляется к выделению, второй узел выделяет участок между узлами
+        const s = st.selection;
+        if (nodeId !== null && s?.kind === "node" && s.id !== nodeId) return selectSection(s.id, nodeId);
+        if (nodeId !== null) return st.select({ kind: "node", id: nodeId });
+        if (wayId !== null) return toggleWay(wayId);
+        return;
+      }
       if (t === "select") {
         st.select(nodeId !== null ? { kind: "node", id: nodeId } : wayId !== null ? { kind: "way", id: wayId } : null);
         if (nodeId === null && wayId === null) st.setHighlight([]);
@@ -270,7 +280,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const layersData = useMemo(() => {
     if (!data) return null;
     const onRoad = drivableNodeSet(data);
-    const roads: RoadItem[] = [], others: { path: [number, number][]; color: [number, number, number, number]; width: number }[] = [], buildings: { poly: [number, number][]; h: number }[] = [];
+    type Line = { id: number; path: [number, number][]; color: [number, number, number, number]; width: number };
+    // переходы рисуются поверх дорог, остальные линии под ними
+    const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], buildings: { poly: [number, number][]; h: number }[] = [];
     const deg = new Map<number, number>();
     const hl = new Set(highlight);
     const ways = [...data.ways.values()];
@@ -292,7 +304,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         buildings.push({ poly: w.nodeIds.map(coord), h: lv * 3 });
       } else if (w.tags.highway || w.tags.railway) {
         const rail = !!w.tags.railway;
-        others.push({ path: w.nodeIds.map(coord), color: rail ? [130, 100, 160, 220] : [150, 130, 115, 150], width: rail ? 2 : 1 });
+        // рельсы и переходы толще: их выбирают кликом
+        const cross = w.tags.footway === "crossing";
+        (cross ? crossings : others).push({ id: w.id, path: w.nodeIds.map(coord), color: hl.has(w.id) ? [150, 90, 220, 255] : rail ? [130, 100, 160, 230] : cross ? [60, 60, 60, 220] : [150, 130, 115, 150], width: rail ? 3 : cross ? 3 : 1 });
       }
     }
     roads.sort((a, b) => roadClass(data.ways.get(a.id)!).rank - roadClass(data.ways.get(b.id)!).rank);
@@ -312,7 +326,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         arrows.push({ pos: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], angle: ang });
       }
     }
-    return { roads, others, buildings, junctions, signals, arrows };
+    return { roads, others, crossings, buildings, junctions, signals, arrows };
   }, [data, version, heat, norms, showBuildings, highlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- правки относительно исходного файла ----------
@@ -327,9 +341,13 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     if (!overlay) return;
     if (!data || !layersData) { overlay.setProps({ layers: [] }); return; }
     const selWay = selection?.kind === "way" ? data.ways.get(selection.id) : undefined;
+    const selIds = new Set(selection?.kind === "ways" ? selection.ids : []);
+    const section = selection?.kind === "ways" && selection.section ? selection.section : null;
+    const sectionPath = section ? section.nodes.map((id) => data.nodes.get(id)).filter(Boolean).map((n) => [n!.lon, n!.lat] as [number, number]) : [];
     const selNode = selection?.kind === "node" ? selection.id : null;
     const showNodes = zoom >= 16.5 || tool !== "select";
-    const vertices: Pt[] = selWay ? selWay.nodeIds.map((id) => { const n = data.nodes.get(id)!; return { id, pos: [n.lon, n.lat] as [number, number] }; }) : [];
+    const vertIds = selWay ? selWay.nodeIds : section ? [section.from, section.to] : [];
+    const vertices: Pt[] = vertIds.filter((id) => data.nodes.has(id)).map((id) => { const n = data.nodes.get(id)!; return { id, pos: [n.lon, n.lat] as [number, number] }; });
     const nodes = showNodes && zoom >= 15.5 ? [...layersData.junctions, ...vertices] : vertices;
     const errs = check?.errors ?? [];
     const drawPath = draw.map((p) => [p.lon, p.lat] as [number, number]);
@@ -340,22 +358,25 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const flat = { depthCompare: "always" as const, depthWriteEnabled: false };
     const buildingsLayer = new PolygonLayer({ id: "buildings", data: layersData.buildings, getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: dark ? [62, 72, 86, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140], getLineColor: dark ? [92, 104, 120, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d });
     const groundLayers = [
-        new PathLayer({ id: "others", data: layersData.others, getPath: (d) => d.path, getColor: (d) => soften(d.color, dark), getWidth: (d) => d.width, widthUnits: "pixels", updateTriggers: { getColor: dark } }),
+        new PathLayer({ id: "others", data: layersData.others, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => (d.id === selWay?.id ? d.width + 2 : d.width), widthUnits: "pixels", widthMinPixels: 1, pickable: true, updateTriggers: { getColor: [dark, selWay?.id], getWidth: selWay?.id } }),
         // широкая цветная подложка под измененными дорогами
         new PathLayer<ChangedRoad>({ id: "changes", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 14, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({ id: "roads-casing", data: layersData.roads, getPath: (d) => d.path, getColor: dark ? [10, 13, 17, 230] : [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({
           id: "roads", data: layersData.roads, getPath: (d) => d.path,
-          getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
+          getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
           capRounded: true, jointRounded: true, pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 120],
-          updateTriggers: { getColor: [selWay?.id, version, dark] },
+          updateTriggers: { getColor: [selWay?.id, version, dark, selection] },
         }),
+        new PathLayer({ id: "crossings", data: layersData.crossings, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
         new TextLayer({ id: "arrows", data: zoom >= 16 ? layersData.arrows : [], getPosition: (d) => d.pos, getText: () => "▶", getAngle: (d) => d.angle, getSize: 11, getColor: dark ? [225, 230, 236, 220] : [40, 40, 40, 220], characterSet: ["▶"], billboard: false }),
     ].map((l) => l.clone({ parameters: flat }));
     const pointLayers = [
         new ScatterplotLayer<Pt>({ id: "nodes", data: nodes, getPosition: (d) => d.pos, getRadius: (d) => (d.id === selNode ? 6 : 3.5), radiusUnits: "pixels", getFillColor: (d) => (d.id === selNode ? [31, 111, 209, 255] : [255, 255, 255, 255]), getLineColor: [31, 111, 209, 255], stroked: true, lineWidthMinPixels: 1.5, pickable: true, updateTriggers: { getRadius: selNode, getFillColor: selNode } }),
         new ScatterplotLayer<Pt>({ id: "signals", data: layersData.signals, getPosition: (d) => d.pos, getRadius: 6, radiusUnits: "pixels", getFillColor: [229, 72, 63, 255], getLineColor: [255, 255, 255, 255], stroked: true, lineWidthMinPixels: 2, pickable: true }),
         new ScatterplotLayer({ id: "errors", data: errs, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => (d.type === "trap" || d.type === "isolated" ? 16 : 11), radiusUnits: "pixels", filled: true, getFillColor: (d) => (d.sev === "danger" ? [216, 64, 47, 40] : d.sev === "warn" ? [229, 154, 40, 40] : [61, 107, 143, 40]), getLineColor: (d) => (d.sev === "danger" ? [216, 64, 47, 255] : d.sev === "warn" ? [229, 154, 40, 255] : [61, 107, 143, 255]), stroked: true, lineWidthMinPixels: 2, pickable: true }),
+        // участок между двумя узлами (Shift+клик по второму узлу)
+        new PathLayer({ id: "section", data: sectionPath.length > 1 ? [{ path: sectionPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 230], getWidth: 7, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer({ id: "draw", data: drawPath.length > 1 ? [{ path: drawPath }] : [], getPath: (d) => d.path, getColor: [31, 111, 209, 255], getWidth: 3, widthUnits: "pixels" }),
         new ScatterplotLayer({ id: "draw-pts", data: draw, getPosition: (d) => [d.lon, d.lat], getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 255] }),
     ].map((l) => l.clone({ parameters: flat }));
@@ -366,7 +387,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   }, [layersData, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark]);
 
   const hint: Record<string, string> = {
-    select: "Клик выделяет дорогу или узел. Узел можно перетащить. При сильном приближении видны все узлы.",
+    select: "Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого.",
     draw: "Кликайте точки новой дороги, к узлам прилипает. Enter или двойной клик - готово, Esc - отмена.",
     signal: "Клик по узлу дороги ставит или убирает светофор.",
     split: "Клик по среднему узлу дороги разрезает ее на две.",

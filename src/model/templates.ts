@@ -7,7 +7,7 @@ export const TEMPLATES: Record<string, { name: string; tags: Tags }> = {
   oneway: { name: "Односторонняя, 2 полосы", tags: { highway: "secondary", lanes: "2", maxspeed: "60", oneway: "yes", surface: "asphalt" } },
   residential: { name: "Жилая 1+1, 40", tags: { highway: "residential", lanes: "2", maxspeed: "40", oneway: "no", surface: "asphalt" } },
   service: { name: "Проезд, 20", tags: { highway: "service", lanes: "1", maxspeed: "20" } },
-  dirt: { name: "Грунтовая, 40", tags: { highway: "unclassified", lanes: "2", maxspeed: "40", surface: "dirt" } },
+  dirt: { name: "Грунтовая, 40", tags: { highway: "unclassified", lanes: "2", maxspeed: "40", surface: "ground" } },
   link: { name: "Съезд, 1 полоса", tags: { highway: "primary_link", lanes: "1", maxspeed: "40", oneway: "yes" } },
 };
 
@@ -15,6 +15,25 @@ export const TEMPLATES: Record<string, { name: string; tags: Tags }> = {
 export const MODIFIERS: Record<string, { name: string; tags: Tags; remove?: string[] }> = {
   bridge: { name: "Мост", tags: { bridge: "yes", layer: "1" }, remove: ["tunnel"] },
   tunnel: { name: "Тоннель", tags: { tunnel: "yes", layer: "-1" }, remove: ["bridge"] },
-  ground: { name: "Обычный уровень", tags: {}, remove: ["bridge", "tunnel", "layer"] },
-  roundabout: { name: "Кольцо", tags: { junction: "roundabout", oneway: "yes" } },
+  ground: { name: "Без сооружения", tags: {}, remove: ["bridge", "tunnel", "layer"] },
 };
+
+// ---------- свои шаблоны ----------
+// Шаблон - набор линий. Точки в метрах от места вставки: x на восток, y на север.
+export interface CustomLine { tags: Tags; pts: [number, number][]; closed?: boolean }
+export interface CustomTemplate { id: string; name: string; lines: CustomLine[] }
+
+const KEY = "wayfinders-templates";
+
+export function loadCustom(): CustomTemplate[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustom(list: CustomTemplate[]) {
+  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* хранилище недоступно */ }
+}

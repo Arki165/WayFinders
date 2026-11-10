@@ -1,6 +1,6 @@
 // Расчеты загрузки участка по формулам транспортников
 import type { OsmData, OsmWay } from "../osm/types";
-import { lanesOf, maxSpeed, SURFACES } from "./roads";
+import { lanesOf, maxSpeed, SURFACES, SURFACE_ALIAS } from "./roads";
 import { wayLengthM } from "./geo";
 
 // Нормативы, которые можно менять в программе (значения условные, уточняют транспортники)
@@ -49,7 +49,8 @@ export function capacityPerLane(w: OsmWay, norms: Norms): number {
 export function surfaceK(w: OsmWay, norms: Norms): number {
   const s = w.tags.surface;
   if (!s) return 1;
-  return norms.surfaceK[s] ?? 1;
+  // старые значения из файлов (грунтовка, без покрытия) считаем как похожее покрытие
+  return norms.surfaceK[s] ?? norms.surfaceK[SURFACE_ALIAS[s]] ?? 1;
 }
 
 export function calcWay(data: OsmData, w: OsmWay, norms: Norms): CalcResult {

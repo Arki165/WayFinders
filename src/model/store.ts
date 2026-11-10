@@ -5,8 +5,12 @@ import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { DEFAULT_NORMS, type Norms } from "./calc";
 import { distM, makeProjection, project } from "./geo";
+import { isDrivable, lanesOf, roadClass, type Arm } from "./roads";
+import type { CustomTemplate } from "./templates";
 
-export type Selection = { kind: "way"; id: number } | { kind: "node"; id: number } | null;
+// ways - несколько дорог (Shift+клик) или участок между двумя узлами (section)
+export type Section = { from: number; to: number; nodes: number[]; length: number };
+export type Selection = { kind: "way"; id: number } | { kind: "node"; id: number } | { kind: "ways"; ids: number[]; section?: Section } | null;
 export type Tool = "select" | "draw" | "node" | "join" | "unjoin" | "signal" | "split" | "delete";
 
 // Команда правки: умеет сделать и отменить себя
@@ -144,6 +148,12 @@ function fixSelection(get: () => EditorState, set: (p: Partial<EditorState>) => 
   const { selection: s, data } = get();
   if (!s || !data) return;
   if ((s.kind === "way" && !data.ways.has(s.id)) || (s.kind === "node" && !data.nodes.has(s.id))) set({ selection: null });
+  if (s.kind === "ways") {
+    const ids = s.ids.filter((id) => data.ways.has(id));
+    if (!ids.length) set({ selection: null });
+    else if (ids.length === 1) set({ selection: { kind: "way", id: ids[0] } });
+    else if (ids.length !== s.ids.length || s.section) set({ selection: { kind: "ways", ids } });
+  }
 }
 
 // ---------- операции правки ----------
@@ -392,5 +402,417 @@ export function fixError(e: GraphError) {
       if (!w.tags.maxspeed) w.tags.maxspeed = "60";
     });
   }
-  if (e.type === "bridge") ed().run("layer=1 для моста", e.ways, [], () => { d.ways.get(e.ways[0])!.tags.layer = "1"; });
+  if (e.type === "bridge") ed().run("Мост поднят над дорогой", e.ways, [], () => { d.ways.get(e.ways[0])!.tags.layer = "1"; });
+}
+
+// ---------- общие помощники ----------
+type XY = [number, number];
+const unit = (v: XY): XY => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+const angDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+// Плоские координаты в метрах вокруг узла: x на восток, y на север
+function local(d: OsmData, lat: number, lon: number) {
+  const pr = makeProjection(lat, lon);
+  return {
+    P: (id: number): XY => { const n = d.nodes.get(id)!; const [x, y] = pr.toXY(n.lat, n.lon); return [x, -y]; },
+    // новый узел в точке (x, y)
+    add: (p: XY, tags: Tags = {}): number => { const [la, lo] = pr.toLatLon(p[0], -p[1]); const id = newId(); d.nodes.set(id, { id, lat: la, lon: lo, tags, attrs: {} }); return id; },
+  };
+}
+
+// Где линия way пересекает проезжие дороги на том же уровне без общего узла
+function crossingsOf(d: OsmData, way: OsmWay, P: (id: number) => XY) {
+  const hits: { i: number; t: number; road: OsmWay; p: XY }[] = [];
+  const lay = way.tags.layer ?? "0";
+  for (const w of d.ways.values()) {
+    if (w.id === way.id || !isDrivable(w) || (w.tags.layer ?? "0") !== lay) continue;
+    for (let j = 1; j < w.nodeIds.length; j++) {
+      const a = w.nodeIds[j - 1], b = w.nodeIds[j];
+      if (way.nodeIds.includes(a) || way.nodeIds.includes(b)) continue;
+      const p3 = P(a), p4 = P(b);
+      for (let i = 1; i < way.nodeIds.length; i++) {
+        const p1 = P(way.nodeIds[i - 1]), p2 = P(way.nodeIds[i]);
+        const den = (p2[0] - p1[0]) * (p4[1] - p3[1]) - (p2[1] - p1[1]) * (p4[0] - p3[0]);
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((p3[0] - p1[0]) * (p4[1] - p3[1]) - (p3[1] - p1[1]) * (p4[0] - p3[0])) / den;
+        const u = ((p3[0] - p1[0]) * (p2[1] - p1[1]) - (p3[1] - p1[1]) * (p2[0] - p1[0])) / den;
+        if (t > 0 && t < 1 && u > 0 && u < 1) hits.push({ i, t, road: w, p: [p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1])] });
+      }
+    }
+  }
+  return hits;
+}
+
+// ---------- несколько дорог и участок между узлами ----------
+
+// Shift+клик по дороге: добавить к выделению или убрать из него
+export function toggleWay(id: number) {
+  const s = ed().selection;
+  const ids = s?.kind === "way" ? [s.id] : s?.kind === "ways" && !s.section ? [...s.ids] : [];
+  const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+  ed().select(next.length === 0 ? null : next.length === 1 ? { kind: "way", id: next[0] } : { kind: "ways", ids: next });
+}
+
+const adjacentIn = (w: OsmWay, x: number, y: number) => w.nodeIds.some((id, i) => i > 0 && ((w.nodeIds[i - 1] === x && id === y) || (w.nodeIds[i - 1] === y && id === x)));
+
+// Кратчайший путь между двумя узлами по проезжим дорогам (направления не учитываем)
+export function findSection(a: number, b: number): Section | null {
+  const d = ed().data!;
+  const adj = new Map<number, [number, number][]>();
+  const link = (x: number, y: number, l: number) => { if (!adj.has(x)) adj.set(x, []); adj.get(x)!.push([y, l]); };
+  for (const w of d.ways.values()) {
+    if (!isDrivable(w)) continue;
+    for (let i = 1; i < w.nodeIds.length; i++) {
+      const p = d.nodes.get(w.nodeIds[i - 1]), q = d.nodes.get(w.nodeIds[i]);
+      if (!p || !q) continue;
+      const l = distM(p.lat, p.lon, q.lat, q.lon);
+      link(p.id, q.id, l); link(q.id, p.id, l);
+    }
+  }
+  // алгоритм Дейкстры с двоичной кучей
+  const dist = new Map<number, number>([[a, 0]]), prev = new Map<number, number>();
+  const heap: [number, number][] = [[0, a]];
+  const push = (e: [number, number]) => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  while (heap.length) {
+    const [dv, v] = pop();
+    if (v === b) break;
+    if (dv > dist.get(v)!) continue;
+    for (const [u, l] of adj.get(v) ?? []) if (dv + l < (dist.get(u) ?? Infinity)) { dist.set(u, dv + l); prev.set(u, v); push([dv + l, u]); }
+  }
+  if (!dist.has(b) || a === b) return null;
+  const nodes = [b];
+  while (nodes[nodes.length - 1] !== a) nodes.push(prev.get(nodes[nodes.length - 1])!);
+  return { from: a, to: b, nodes: nodes.reverse(), length: dist.get(b)! };
+}
+
+// Дороги, по которым идет участок
+export function sectionWays(nodes: number[]): number[] {
+  const d = ed().data!;
+  const out = new Set<number>();
+  const ws = [...d.ways.values()].filter(isDrivable);
+  for (let i = 1; i < nodes.length; i++) { const w = ws.find((x) => adjacentIn(x, nodes[i - 1], nodes[i])); if (w) out.add(w.id); }
+  return [...out];
+}
+
+export function selectSection(a: number, b: number) {
+  const s = findSection(a, b);
+  if (!s) return ed().toast("Между этими узлами нет пути по дорогам");
+  ed().select({ kind: "ways", ids: sectionWays(s.nodes), section: s });
+  ed().toast(`Участок между узлами: ${Math.round(s.length)} м. Изменения применятся только к нему`);
+}
+
+// Отрезать от дороги часть между узлами x и y. Сама дорога становится этой частью, остальное - новые дороги.
+function cutWay(d: OsmData, w: OsmWay, x: number, y: number): number {
+  const ids = w.nodeIds;
+  if (ids[0] === ids[ids.length - 1]) return w.id; // замкнутую (кольцо) не режем
+  const i1 = ids.indexOf(x), i2 = ids.indexOf(y);
+  const lo = Math.min(i1, i2), hi = Math.max(i1, i2);
+  if (lo > 0) { const id = newId(); d.ways.set(id, { id, nodeIds: ids.slice(0, lo + 1), tags: { ...w.tags }, attrs: {} }); }
+  if (hi < ids.length - 1) { const id = newId(); d.ways.set(id, { id, nodeIds: ids.slice(hi), tags: { ...w.tags }, attrs: {} }); }
+  w.nodeIds = ids.slice(lo, hi + 1);
+  return w.id;
+}
+
+// Разрезать дороги по краям участка, вернуть дороги, из которых теперь состоит участок
+function splitSection(d: OsmData, nodes: number[]): number[] {
+  const out: number[] = [];
+  let i = 0;
+  while (i < nodes.length - 1) {
+    const w = [...d.ways.values()].find((x) => isDrivable(x) && adjacentIn(x, nodes[i], nodes[i + 1]));
+    if (!w) { i++; continue; }
+    let j = i + 1;
+    while (j < nodes.length - 1 && adjacentIn(w, nodes[j], nodes[j + 1])) j++;
+    out.push(cutWay(d, w, nodes[i], nodes[j]));
+    i = j;
+  }
+  return [...new Set(out)];
+}
+
+// Изменить теги сразу у всех выделенных дорог или у участка между узлами
+export function patchSelection(patch: Tags, remove: string[], label: string) {
+  const s = ed().selection, d = ed().data!;
+  if (s?.kind !== "ways") return;
+  const apply = (w: OsmWay) => {
+    const t = { ...w.tags, ...patch };
+    for (const k of remove) delete t[k];
+    for (const k of Object.keys(t)) if (t[k] === "") delete t[k];
+    w.tags = t;
+  };
+  if (!s.section) {
+    ed().run(`${label} (дорог: ${s.ids.length})`, s.ids, [], () => { for (const id of s.ids) { const w = d.ways.get(id); if (w) apply(w); } });
+    return;
+  }
+  const nodes = s.section.nodes;
+  let result: number[] = [];
+  ed().run(label + " на участке", sectionWays(nodes), [], () => {
+    result = splitSection(d, nodes);
+    for (const id of result) apply(d.ways.get(id)!);
+  });
+  // после разрезания участок - это просто набор дорог
+  ed().select(result.length === 1 ? { kind: "way", id: result[0] } : result.length ? { kind: "ways", ids: result } : null);
+}
+
+export function deleteWays(ids: number[]) {
+  const d = ed().data!;
+  ed().run(`Удаление дорог: ${ids.length}`, ids, [], () => { for (const id of ids) d.ways.delete(id); });
+  ed().select(null);
+}
+
+// ---------- шаблоны-вставки ----------
+const drivableWith = (d: OsmData, nodeId: number) => [...d.ways.values()].filter((w) => isDrivable(w) && w.nodeIds.includes(nodeId));
+
+// Перекресток превращается в круговое движение радиусом R метров
+export function makeRoundabout(nodeId: number, R = 18) {
+  const d = ed().data!;
+  const x0 = d.nodes.get(nodeId);
+  const ws = drivableWith(d, nodeId);
+  if (!x0 || !ws.length) return ed().toast("Кольцо ставится в узел дороги");
+  if (ws.some((w) => w.tags.junction === "roundabout")) return ed().toast("Здесь уже круговое движение");
+  const { P, add } = local(d, x0.lat, x0.lon);
+  const usedElsewhere = [...d.ways.values()].some((w) => !ws.includes(w) && w.nodeIds.includes(nodeId));
+  const main = ws.reduce((a, b) => (roadClass(b).rank > roadClass(a).rank ? b : a));
+  let ring = 0;
+  ed().run("Круговое движение", ws.map((w) => w.id), [nodeId], () => {
+    const entries: { id: number; ang: number }[] = [];
+    // идем от центра по рукаву до первого узла за окружностью, там ставим въезд на кольцо
+    const arm = (path: number[]): { keep: number[]; entry: number } | null => {
+      for (let k = 1; k < path.length; k++) {
+        const p = P(path[k]);
+        if (Math.hypot(p[0], p[1]) < R) continue;
+        const q = P(path[k - 1]), v: XY = [p[0] - q[0], p[1] - q[1]];
+        const A = v[0] ** 2 + v[1] ** 2, B = 2 * (q[0] * v[0] + q[1] * v[1]), C = q[0] ** 2 + q[1] ** 2 - R * R;
+        const t = (-B + Math.sqrt(Math.max(0, B * B - 4 * A * C))) / (2 * A);
+        const e: XY = [q[0] + t * v[0], q[1] + t * v[1]];
+        const id = add(e);
+        entries.push({ id, ang: Math.atan2(e[1], e[0]) });
+        return { keep: path.slice(k), entry: id };
+      }
+      return null; // рукав короче радиуса кольца
+    };
+    for (const w of ws) {
+      const ids = w.nodeIds, i = ids.indexOf(nodeId);
+      const before = i > 0 ? arm(ids.slice(0, i + 1).reverse()) : null;
+      const after = i < ids.length - 1 ? arm(ids.slice(i)) : null;
+      const parts: number[][] = [];
+      if (before) parts.push([...before.keep.reverse(), before.entry]);
+      if (after) parts.push([after.entry, ...after.keep]);
+      if (!parts.length) { d.ways.delete(w.id); continue; }
+      w.nodeIds = parts[0];
+      if (parts[1]) { const id = newId(); d.ways.set(id, { id, nodeIds: parts[1], tags: { ...w.tags }, attrs: {} }); }
+    }
+    // точки кольца через 22,5° и въезды; порядок против часовой стрелки (правостороннее движение)
+    const pts = [...entries];
+    for (let k = 0; k < 16; k++) {
+      const ang = -Math.PI + (k * Math.PI) / 8;
+      if (entries.some((e) => Math.abs(angDiff(e.ang, ang)) < 0.2)) continue;
+      pts.push({ id: add([R * Math.cos(ang), R * Math.sin(ang)]), ang });
+    }
+    pts.sort((a, b) => a.ang - b.ang);
+    ring = newId();
+    d.ways.set(ring, { id: ring, nodeIds: [...pts.map((p) => p.id), pts[0].id], tags: { highway: main.tags.highway, junction: "roundabout", lanes: "2", maxspeed: "40", surface: main.tags.surface ?? "asphalt" }, attrs: {} });
+    if (!usedElsewhere) d.nodes.delete(nodeId);
+  });
+  ed().select({ kind: "way", id: ring });
+  ed().toast("Перекресток заменен круговым движением");
+}
+
+// Направление дороги в узле: на конце - куда дорога «продолжилась бы», в середине - по ходу линии
+function roadDir(d: OsmData, w: OsmWay, nodeId: number, P: (id: number) => XY) {
+  const ids = w.nodeIds, i = ids.indexOf(nodeId);
+  const end = i === 0 || i === ids.length - 1;
+  if (end) { const nb = P(ids[i === 0 ? 1 : i - 1]); return { end, dir: unit([-nb[0], -nb[1]]) }; }
+  const a = P(ids[i - 1]), b = P(ids[i + 1]);
+  return { end, dir: unit([b[0] - a[0], b[1] - a[1]]) };
+}
+
+// Разворотная петля: на конце дороги - вперед, в середине - вправо от направления линии
+export function makeUturn(nodeId: number, R = 12) {
+  const d = ed().data!;
+  const n = d.nodes.get(nodeId);
+  const w = drivableWith(d, nodeId)[0];
+  if (!n || !w) return ed().toast("Разворот ставится в узел дороги");
+  const { P, add } = local(d, n.lat, n.lon);
+  const { end, dir } = roadDir(d, w, nodeId, P);
+  const out: XY = end ? dir : [dir[1], -dir[0]];
+  const c: XY = [out[0] * R, out[1] * R];
+  const a0 = Math.atan2(-out[1], -out[0]);
+  let id = 0;
+  ed().run("Шаблон: разворот на 180°", [], [], () => {
+    const loop = [nodeId];
+    for (let k = 1; k < 16; k++) loop.push(add([c[0] + R * Math.cos(a0 + (k * Math.PI) / 8), c[1] + R * Math.sin(a0 + (k * Math.PI) / 8)]));
+    loop.push(nodeId);
+    id = newId();
+    d.ways.set(id, { id, nodeIds: loop, tags: { highway: "service", service: "turnaround", lanes: "1", maxspeed: "20", surface: w.tags.surface ?? "asphalt" }, attrs: {} });
+  });
+  ed().select({ kind: "way", id });
+}
+
+// Поворот на 90°: продолжение дороги с конца дугой радиусом R и прямым участком
+export function makeTurn(nodeId: number, side: "left" | "right", R = 15, tail = 30) {
+  const d = ed().data!;
+  const n = d.nodes.get(nodeId);
+  const ws = drivableWith(d, nodeId);
+  if (!n || ws.length !== 1) return ed().toast("Поворот продолжает дорогу: выберите конечный узел дороги");
+  const w = ws[0];
+  const { P, add } = local(d, n.lat, n.lon);
+  const { end, dir } = roadDir(d, w, nodeId, P);
+  if (!end) return ed().toast("Поворот продолжает дорогу: выберите конечный узел дороги");
+  const sg = side === "left" ? 1 : -1;
+  const nrm: XY = [-dir[1] * sg, dir[0] * sg];
+  const c: XY = [nrm[0] * R, nrm[1] * R];
+  const a0 = Math.atan2(-nrm[1], -nrm[0]);
+  let id = 0;
+  ed().run(`Шаблон: поворот на 90° ${side === "left" ? "влево" : "вправо"}`, [], [], () => {
+    const pts = [nodeId];
+    let last: XY = [0, 0];
+    for (let k = 1; k <= 6; k++) { last = [c[0] + R * Math.cos(a0 + (sg * k * Math.PI) / 12), c[1] + R * Math.sin(a0 + (sg * k * Math.PI) / 12)]; pts.push(add(last)); }
+    pts.push(add([last[0] + nrm[0] * tail, last[1] + nrm[1] * tail]));
+    id = newId();
+    const t = { ...w.tags };
+    delete t.name;
+    d.ways.set(id, { id, nodeIds: pts, tags: t, attrs: {} });
+  });
+  ed().select({ kind: "way", id });
+}
+
+// Мост на дороге: над пересечением с другой дорогой (или посередине), по half метров в каждую сторону
+export function insertBridge(wayId: number, half = 25) {
+  const d = ed().data!;
+  const w = d.ways.get(wayId);
+  if (!w) return;
+  const n0 = d.nodes.get(w.nodeIds[0])!;
+  const { P, add } = local(d, n0.lat, n0.lon);
+  // расстояние вдоль дороги до каждого узла
+  const s = [0];
+  for (let i = 1; i < w.nodeIds.length; i++) { const a = P(w.nodeIds[i - 1]), b = P(w.nodeIds[i]); s.push(s[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  const L = s[s.length - 1];
+  const hits = crossingsOf(d, w, P).map((h) => s[h.i - 1] + h.t * (s[h.i] - s[h.i - 1]));
+  const at = hits.length ? hits.sort((a, b) => Math.abs(a - L / 2) - Math.abs(b - L / 2))[0] : L / 2;
+  const bridgeTags = (x: OsmWay) => { x.tags = { ...x.tags, bridge: "yes", layer: "1" }; delete x.tags.tunnel; };
+  if (L < 2 * half + 10) {
+    ed().run("Шаблон: мост", [wayId], [], () => bridgeTags(w));
+    return ed().toast("Дорога короткая: мостом стала вся");
+  }
+  // узел в точке на расстоянии x от начала дороги (существующий, если он ближе 3 м)
+  const nodeAt = (x: number) => {
+    const i = s.findIndex((v) => v >= x);
+    if (Math.abs(s[i] - x) < 3) return w.nodeIds[i];
+    if (i > 0 && Math.abs(s[i - 1] - x) < 3) return w.nodeIds[i - 1];
+    const a = P(w.nodeIds[i - 1]), b = P(w.nodeIds[i]), t = (x - s[i - 1]) / (s[i] - s[i - 1]);
+    const id = add([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+    w.nodeIds.splice(i, 0, id);
+    s.splice(i, 0, x);
+    return id;
+  };
+  ed().run("Шаблон: мост", [wayId], [], () => {
+    const n1 = nodeAt(Math.max(0, at - half)), n2 = nodeAt(Math.min(L, at + half));
+    bridgeTags(d.ways.get(cutWay(d, w, n1, n2))!);
+  });
+  ed().select({ kind: "way", id: wayId });
+  ed().toast(hits.length ? "Мост поставлен над пересечением с другой дорогой" : "Мост поставлен в середине дороги");
+}
+
+// ---------- пешеходный переход ----------
+const crossingWays = (d: OsmData, nodeId: number) => [...d.ways.values()].filter((w) => w.tags.footway === "crossing" && w.nodeIds.includes(nodeId));
+
+// Переход: узел на дороге и пешеходная дорожка поперек нее. arm - через какой рукав перекрестка (в 10 м от центра)
+export function setCrossing(nodeId: number, arm: Arm | null, signals: boolean) {
+  const d = ed().data!;
+  const x = d.nodes.get(nodeId);
+  const road = arm ? d.ways.get(arm.wayId) : drivableWith(d, nodeId)[0];
+  if (!x || !road) return;
+  const kind = signals ? "traffic_signals" : "uncontrolled";
+  const old = crossingWays(d, nodeId);
+  ed().run("Пешеходный переход", [road.id, ...old.map((w) => w.id)], [nodeId], () => {
+    for (const w of old) d.ways.delete(w.id);
+    const { P, add } = local(d, x.lat, x.lon);
+    let c = nodeId;
+    if (arm) {
+      const nb = P(arm.nb), len = Math.hypot(nb[0], nb[1]), k = Math.min(10, len / 2) / len;
+      c = add([nb[0] * k, nb[1] * k]);
+      for (let i = 1; i < road.nodeIds.length; i++) {
+        const p = road.nodeIds[i - 1], q = road.nodeIds[i];
+        if ((p === nodeId && q === arm.nb) || (p === arm.nb && q === nodeId)) { road.nodeIds.splice(i, 0, c); break; }
+      }
+    }
+    const { dir } = roadDir(d, road, c, P);
+    const across: XY = [-dir[1], dir[0]];
+    const p0 = P(c), hw = (lanesOf(road) * 3.5) / 2 + 2;
+    const a = add([p0[0] + across[0] * hw, p0[1] + across[1] * hw]), b = add([p0[0] - across[0] * hw, p0[1] - across[1] * hw]);
+    const id = newId();
+    d.ways.set(id, { id, nodeIds: [a, c, b], tags: { highway: "footway", footway: "crossing", crossing: kind }, attrs: {} });
+    const cn = d.nodes.get(c)!;
+    cn.tags = { ...cn.tags, highway: cn.tags.highway === "traffic_signals" ? "traffic_signals" : "crossing", crossing: kind };
+    if (c !== nodeId) newCrossing = c;
+  });
+  ed().toast(arm ? `Переход через «${arm.name}» поставлен в 10 м от перекрестка` : "Переход поставлен");
+  if (newCrossing) { ed().select({ kind: "node", id: newCrossing }); newCrossing = 0; }
+}
+let newCrossing = 0;
+
+export function removeCrossing(nodeId: number) {
+  const d = ed().data!;
+  const ws = crossingWays(d, nodeId);
+  const ends = ws.flatMap((w) => w.nodeIds.filter((id) => id !== nodeId));
+  ed().run("Переход убран", ws.map((w) => w.id), [nodeId, ...ends], () => {
+    for (const w of ws) d.ways.delete(w.id);
+    // концы дорожки удаляем, если они больше ни к чему не относятся
+    for (const id of ends) if (![...d.ways.values()].some((w) => w.nodeIds.includes(id))) d.nodes.delete(id);
+    const n = d.nodes.get(nodeId)!;
+    const t = { ...n.tags };
+    if (t.highway === "crossing") delete t.highway;
+    delete t.crossing;
+    n.tags = t;
+  });
+}
+
+// Поменять, откуда и куда идет переход (порядок дорожки)
+export function flipCrossing(nodeId: number) {
+  const d = ed().data!;
+  const ws = crossingWays(d, nodeId);
+  ed().run("Направление перехода", ws.map((w) => w.id), [], () => { for (const w of ws) w.nodeIds.reverse(); });
+}
+
+export function crossingOf(nodeId: number): OsmWay | undefined {
+  return crossingWays(ed().data!, nodeId)[0];
+}
+
+// ---------- свои шаблоны ----------
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+// Шаблон из выделенных дорог: точки в метрах от их центра
+export function templateFromWays(ids: number[], name: string): CustomTemplate | null {
+  const d = ed().data!;
+  const ws = ids.map((id) => d.ways.get(id)).filter(Boolean) as OsmWay[];
+  const all = ws.flatMap((w) => w.nodeIds.map((id) => d.nodes.get(id)!)).filter(Boolean);
+  if (!all.length) return null;
+  const lat = all.reduce((s, n) => s + n.lat, 0) / all.length, lon = all.reduce((s, n) => s + n.lon, 0) / all.length;
+  const { P } = local(d, lat, lon);
+  const lines = ws.map((w) => {
+    const closed = w.nodeIds.length > 2 && w.nodeIds[0] === w.nodeIds[w.nodeIds.length - 1];
+    const tags = { ...w.tags };
+    for (const k of ["name", "wayfinders:volume", "wayfinders:travel_time"]) delete tags[k];
+    return { tags, closed, pts: (closed ? w.nodeIds.slice(0, -1) : w.nodeIds).map((id): XY => { const p = P(id); return [round1(p[0]), round1(p[1])]; }) };
+  });
+  return { id: Date.now().toString(36), name, lines };
+}
+
+// Вставить шаблон в точку. Одинаковые точки разных линий становятся одним узлом, так линии связаны.
+export function insertTemplate(t: CustomTemplate, lat: number, lon: number) {
+  const d = ed().data!;
+  const { add } = local(d, lat, lon);
+  const made: number[] = [];
+  ed().run("Шаблон: " + t.name, [], [], () => {
+    const byPos = new Map<string, number>();
+    for (const line of t.lines) {
+      const ids = line.pts.map((p) => { const k = p.join(":"); if (!byPos.has(k)) byPos.set(k, add(p)); return byPos.get(k)!; });
+      if (line.closed && ids.length > 2) ids.push(ids[0]);
+      if (ids.length < 2) continue;
+      const id = newId();
+      d.ways.set(id, { id, nodeIds: ids, tags: { ...line.tags }, attrs: {} });
+      made.push(id);
+    }
+  });
+  ed().select(made.length === 1 ? { kind: "way", id: made[0] } : made.length ? { kind: "ways", ids: made } : null);
 }

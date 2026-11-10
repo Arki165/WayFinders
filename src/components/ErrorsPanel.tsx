@@ -9,9 +9,9 @@ const TITLE: Record<GraphError["type"], string> = {
   isolated: "Изолированный участок",
   trap: "Ловушка по направлениям",
   attr: "Не заполнены атрибуты",
-  bridge: "Мост без layer",
+  bridge: "Мост без уровня",
 };
-const FIX: Partial<Record<GraphError["type"], string>> = { torn: "Соединить", glued: "Добавить узел", isolated: "Удалить", attr: "Заполнить", bridge: "layer=1" };
+const FIX: Partial<Record<GraphError["type"], string>> = { torn: "Соединить", glued: "Добавить узел", isolated: "Удалить", attr: "Заполнить", bridge: "Поднять мост" };
 const ORDER: Record<Severity, number> = { danger: 0, warn: 1, info: 2 };
 
 export default function ErrorsPanel() {
@@ -28,8 +28,8 @@ export default function ErrorsPanel() {
       case "torn": return `«${nm(e.ways[0])}» обрывается в ${e.dist!.toFixed(1)} м от «${nm(e.ways[1])}», но не соединена с ней. Машины не смогут здесь проехать.`;
       case "glued": return `«${nm(e.ways[0])}» и «${nm(e.ways[1])}» пересекаются на одном уровне без общего узла: это перекресток или мост.`;
       case "isolated": return e.edge ? `${e.count} узлов не связаны с сетью: кусок обрезан краем карты. Обычно его оставляют.` : `${e.count} узлов не связаны с остальной сетью: машины туда не попадут.`;
-      case "trap": return `${e.count} узлов, ${e.ways.length} дорог: въехать можно, а выехать нельзя или наоборот. Проверьте oneway. MatSim выкинет этот кусок.`;
-      case "attr": return `«${nm(e.ways[0])}»: нет ${e.miss!.join(" и ")}. Симуляторы подставят значения по умолчанию.`;
+      case "trap": return `${e.count} узлов, ${e.ways.length} дорог: въехать можно, а выехать нельзя или наоборот. Проверьте направления движения. MatSim выкинет этот кусок.`;
+      case "attr": return `«${nm(e.ways[0])}»: не задано: ${e.miss!.map((k) => (k === "lanes" ? "число полос" : k === "maxspeed" ? "скорость" : k)).join(" и ")}. Симуляторы подставят значения по умолчанию.`;
       case "bridge": return `«${nm(e.ways[0])}» отмечена мостом без уровня: может склеиться с дорогой под ней.`;
     }
   };
