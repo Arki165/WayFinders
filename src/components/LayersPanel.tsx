@@ -44,8 +44,10 @@ export default function LayersPanel({ level, show, onLevel, onShow, metroCount }
   const hidden = ROWS.filter((r) => !show[r.key]).length;
   return (
     <div className={"layers" + (open ? " open" : "")}>
-      <button className="layers-head" onClick={() => setOpen(!open)} title={tr("Уровни карты и слои: что показывать")}>
-        <Icon name="layers" size={14} />{tr("Слои")}{level === "metro" ? tr(": метро") : ""}{hidden ? tr(" (скрыто {0})", hidden) : ""} <Icon name={open ? "chevronUp" : "chevronDown"} size={13} className="muted" />
+      {/* только значок: и так понятно, что это слои. Число на значке - сколько слоев скрыто */}
+      <button className={"layers-head" + (open ? " on" : "")} onClick={() => setOpen(!open)} title={tr("Уровни карты и слои: что показывать") + (level === "metro" ? tr(": метро") : "") + (hidden ? tr(" (скрыто {0})", hidden) : "")}>
+        <Icon name="layers" size={16} />
+        {hidden > 0 && <span className="layers-badge">{hidden}</span>}
       </button>
       {open && (
         <div className="layers-body">

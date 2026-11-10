@@ -8,6 +8,8 @@ import ComparePanel from "./components/ComparePanel";
 import FormulasPanel from "./components/FormulasPanel";
 import Resizer from "./components/Resizer";
 import RoutesPanel from "./components/RoutesPanel";
+import AppMenu from "./components/AppMenu";
+import GuideDialog from "./components/GuideDialog";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
 import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
@@ -16,7 +18,7 @@ import { drivableNodeSet, isRoadSignal } from "./model/roads";
 import { VERSION } from "./version";
 import StreetSearch from "./components/StreetSearch";
 import Icon, { Logo, type IconName } from "./components/Icon";
-import { LANGS, tr, useLang } from "./i18n";
+import { tr, useLang } from "./i18n";
 
 // Инструменты слева, по группам: выбор | рисование | связи дорог | светофор | удаление. group - с него начинается новая группа
 const TOOLS: { id: Tool; key: string; label: string; icon: IconName; group?: true }[] = [
@@ -78,9 +80,9 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("magnet", magnet ? "on" : "off"); } catch { /* хранилище недоступно */ } }, [magnet]);
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   // язык: при смене все окно перерисовывается с новыми текстами
-  const langId = useLang((s) => s.lang);
-  const setLang = useLang((s) => s.setLang);
+  useLang((s) => s.lang);
   const [toastVisible, setToastVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   // тема запоминается между запусками
@@ -247,11 +249,8 @@ export default function App() {
           <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)} title={tr("Показать здания")}><Icon name="building" /><span className="lbl-2">{tr("Здания")}</span></button>
           <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title={tr("Показать на карте новые, измененные и удаленные дороги")}><Icon name="diff" /><span className="lbl-2">{tr("Правки")}</span></button>
         </div>
-        {/* язык интерфейса: список, чтобы потом можно было добавить другие языки */}
-        <select className="tb-lang" value={langId} onChange={(e) => setLang(e.target.value)} title={tr("Язык интерфейса")}>
-          {LANGS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
-        <button className="tb-icon tb-theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title={theme === "dark" ? tr("Светлая тема") : tr("Темная тема")}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
+        {/* тема, язык, руководство и горячие клавиши - в одном меню, чтобы строка не переносилась */}
+        <AppMenu theme={theme} setTheme={setTheme} onGuide={() => setGuideOpen(true)} onKeys={() => setKeysOpen(true)} />
       </header>
 
       <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${!data ? "" : side ? sideWidth + "px" : "36px"}` }}>
@@ -292,7 +291,7 @@ export default function App() {
                 <button className={bottom === "compare" ? "on" : ""} onClick={() => setBottom("compare")}>{tr("Сравнение с исходным")}</button>
                 <button className={bottom === "formulas" ? "on" : ""} onClick={() => setBottom("formulas")}>{tr("Формулы")}</button>
                 <span className="grow" />
-                <button className="hide" onClick={() => setBottom(null)} title={tr("Скрыть панель и отдать место карте")}><span className="lbl">{tr("Скрыть")}</span><Icon name="chevronDown" size={14} /></button>
+                <button className="hide" onClick={() => setBottom(null)} title={tr("Скрыть панель и отдать место карте")}><Icon name="chevronDown" size={14} /></button>
               </div>
               {bottom === "calc" && <CalcPanel />}
               {bottom === "compare" && <ComparePanel />}
@@ -317,7 +316,7 @@ export default function App() {
               <button className={side === "routes" ? "on" : ""} onClick={() => setSide("routes")}>{tr("Маршруты")}</button>
               <button className={side === "history" ? "on" : ""} onClick={() => setSide("history")}>{tr("История")}</button>
               <span className="grow" />
-              <button className="hide" onClick={() => setSide(null)} title={tr("Скрыть панель и отдать место карте")}><span className="lbl">{tr("Скрыть")}</span><Icon name="chevronRight" size={14} /></button>
+              <button className="hide" onClick={() => setSide(null)} title={tr("Скрыть панель и отдать место карте")}><Icon name="chevronRight" size={14} /></button>
             </div>
             {side === "props" && <PropsPanel />}
             {side === "errors" && <ErrorsPanel />}
@@ -348,6 +347,7 @@ export default function App() {
         ) : <span>{tr("Откройте файл .osm, пример или загрузите район из OpenStreetMap")}</span>}
       </footer>
 
+      {guideOpen && <GuideDialog onClose={() => setGuideOpen(false)} />}
       {keysOpen && (
         // список всех клавиш: открывается кнопкой справа внизу или клавишей «?», закрывается кликом мимо или Esc
         <div className="keys-back" onClick={() => setKeysOpen(false)}>

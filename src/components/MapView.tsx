@@ -1046,7 +1046,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       <div ref={box} className="map" />
       {/* подсказка инструмента и панели под ней стоят столбиком и не налезают друг на друга */}
       {data && <div className="map-top">
-        <div className="maphint">{hint[tool]}</div>
+        <MapHint text={hint[tool]} />
         {children}
       </div>}
       {data && <LayersPanel level={level} show={show} onLevel={setLevel} onShow={setShow} metroCount={layersData?.metroCount ?? 0} />}
@@ -1062,3 +1062,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
 }
 
 export type { OsmWay };
+
+// Подсказка инструмента над картой: полупрозрачная, сама прячется через несколько секунд
+// и появляется снова, когда текст меняется (другой инструмент или следующий шаг).
+function MapHint({ text }: { text: string }) {
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    setShown(true);
+    const t = setTimeout(() => setShown(false), 6000);
+    return () => clearTimeout(t);
+  }, [text]);
+  return <div className={"maphint" + (shown ? "" : " gone")}>{text}</div>;
+}

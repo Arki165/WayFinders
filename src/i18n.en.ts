@@ -2,6 +2,13 @@
 // {0}, {1}... - места для чисел и названий, их порядок как в русском тексте.
 // Строки без перевода программа в режиме разработки пишет в консоль: «[перевод en] нет перевода».
 export const EN: Record<string, string> = {
+  "Настройки и руководство": "Settings and guide",
+  "Тема": "Theme",
+  "Светлая": "Light",
+  "Темная": "Dark",
+  "Язык": "Language",
+  "Руководство пользователя": "User guide",
+  "Руководство пока готовится. Подсказки по инструментам видны над картой, список горячих клавиш открывается клавишей «?».": "The guide is being prepared. Tool hints are shown above the map, and the list of keyboard shortcuts opens with the \"?\" key.",
   " (замеров нет, только модель)": " (no measurements, model only)",
   " (здания не загружены или их нет рядом)": " (buildings not loaded or none nearby)",
   " (нет)": " (none)",

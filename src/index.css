@@ -215,7 +215,9 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
 /* подсказка инструмента и панели под ней, слева сверху; справа место для кнопок карты */
 .map-top { position: absolute; left: 10px; top: 10px; right: 60px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; z-index: 2; pointer-events: none; }
 .map-top > * { pointer-events: auto; }
-.maphint { background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(4px); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: 12px; max-width: 560px; box-shadow: var(--shadow); pointer-events: none !important; }
+.maphint { transition: opacity 0.5s, transform 0.5s; background: color-mix(in srgb, var(--panel) 72%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: 12px; max-width: 560px; box-shadow: var(--shadow); pointer-events: none !important; }
+/* подсказка прячется через несколько секунд, место под ней не занимает */
+.maphint.gone { opacity: 0; transform: translateY(-4px); }
 .optbar { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 4px 4px 10px; display: flex; gap: 8px; align-items: center; box-shadow: var(--shadow); max-width: 100%; }
 .optbar select { min-width: 0; }
 .optbar .check { display: inline-flex; align-items: center; gap: 5px; padding-right: 6px; white-space: nowrap; cursor: pointer; }
@@ -249,11 +251,12 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
 /* ---------- панели и вкладки ---------- */
 .bottom { position: relative; height: 320px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; background: var(--panel); border-top: 1px solid var(--line); }
 .tabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; min-width: 0; overflow: hidden; }
-.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; min-height: 36px; padding: 0 9px; color: var(--muted); }
+.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; min-height: 36px; padding: 0 9px; color: var(--muted); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs button:hover:not(:disabled) { background: none; color: var(--fg); }
 .tabs button.on { color: var(--fg); border-bottom-color: var(--accent); background: none; font-weight: 600; }
 /* кнопка «Скрыть» на панелях и полоски, из которых скрытые панели открываются */
-.tabs button.hide { color: var(--muted); font-size: 12px; min-height: 26px; padding: 0 6px 0 8px; gap: 3px; border-radius: var(--radius); border: 1px solid var(--line); }
+/* кнопка «Скрыть» - только стрелка, никогда не сжимается и не уезжает за край */
+.tabs button.hide { flex: none; color: var(--muted); font-size: 12px; width: 28px; min-height: 26px; padding: 0; justify-content: center; border-radius: var(--radius); border: 1px solid var(--line); }
 .tabs button.hide:hover { color: var(--fg); background: var(--panel-3); }
 .bottom-rail { display: flex; gap: 2px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); overflow: hidden; }
 .bottom-rail button { border: 0; border-radius: 0; background: none; min-height: 32px; padding: 0 10px; gap: 4px; color: var(--muted); }
@@ -460,7 +463,9 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 
 /* панель «Слои» на карте: справа под кнопками масштаба и «Весь граф» */
 .layers { position: absolute; right: 10px; top: 150px; z-index: 2; max-height: calc(100% - 160px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; max-width: 230px; box-shadow: var(--shadow); }
-.layers-head { border: 0; background: transparent; width: 100%; text-align: left; justify-content: flex-start; padding: 5px 9px; display: flex; align-items: center; gap: 5px; }
+.layers-head { position: relative; border: 0; background: transparent; width: 32px; height: 32px; min-height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); }
+.layers-head.on { color: var(--accent); }
+.layers-badge { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; }
 .layers-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 9px 9px; min-height: 0; overflow-y: auto; }
 .layers-level { margin-bottom: 2px; }
 .layers-level button { flex: 1; }
@@ -475,5 +480,19 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .save-list button:hover { background: var(--panel-3); }
 .save-list small { color: var(--muted); font-size: 11px; }
 
-/* выбор языка в верхней панели */
-.tb-lang { width: auto; min-width: 0; height: 32px; padding: 0 6px; font-size: 12px; }
+
+/* меню в правом углу верхней панели: тема, язык, руководство */
+.app-menu { position: relative; }
+.app-menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 290px; padding: 8px; display: grid; gap: 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.am-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.am-row .seg { display: flex; }
+.am-row .seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--fg); background: var(--panel-2); min-height: 28px; padding: 0 8px; border: 1px solid var(--line); }
+.am-row .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.app-menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+.app-menu-list .am-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 8px; min-height: 32px; justify-content: flex-start; background: none; color: var(--fg); border-radius: 6px; }
+.app-menu-list .am-item:hover { background: var(--panel-3); }
+.app-menu-list .am-item kbd { margin-left: auto; }
+
+/* руководство пользователя */
+.dialog.guide { width: min(560px, 100%); }
+.guide-head { display: flex; align-items: center; justify-content: space-between; }

@@ -199,7 +199,7 @@ function WayPanel({ way }: { way: OsmWay }) {
           <button className="icon-btn" onClick={() => reverseWay(way.id)} title={tr("Развернуть направление (R)")}><Icon name="reverse" size={16} /></button>
           <button className="icon-btn danger" onClick={() => deleteWay(way.id)} title={tr("Удалить дорогу (Delete)")}><Icon name="trash" size={16} /></button>
         </>}>
-          <input className="title-input" defaultValue={t[nameKey()] ?? ""} key={way.id + nameKey() + (t[nameKey()] ?? "")} placeholder={wayName(way)} title={tr("Название улицы, можно изменить")} onBlur={(e) => e.target.value !== (t[nameKey()] ?? "") && change({ [nameKey()]: e.target.value }, tr("Название"))} />
+          <input className="title-input" defaultValue={t[nameKey()] ?? ""} key={way.id + nameKey() + (t[nameKey()] ?? "")} placeholder={wayName(way)} title={tr("Название улицы, можно изменить")} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} onBlur={(e) => e.target.value !== (t[nameKey()] ?? "") && change({ [nameKey()]: e.target.value }, tr("Название"))} />
         </Head>
         <div className="sub">{tr("Дорога")}{" "}{way.id}{way.id < 0 ? tr(" (новая)") : ""} · {way.nodeIds.length} {" "}{tr("узлов ·")}{" "}{fmt(L)} {" "}{tr("м")}</div>
       </div>
@@ -290,7 +290,7 @@ function OtherPanel({ way }: { way: OsmWay }) {
           {!building && <button className="icon-btn" onClick={() => reverseWay(way.id)} title={tr("Развернуть направление (R)")}><Icon name="reverse" size={16} /></button>}
           <button className="icon-btn danger" onClick={() => deleteWay(way.id)} title={(building ? tr("Удалить здание") : tr("Удалить")) + " (Delete)"}><Icon name="trash" size={16} /></button>
         </>}>
-          <input className="title-input" defaultValue={t[nameKey()] ?? ""} key={way.id + nameKey() + (t[nameKey()] ?? "")} placeholder={nameOf(t) || kind} title={tr("Название, можно изменить")} onBlur={(e) => e.target.value !== (t[nameKey()] ?? "") && change({ [nameKey()]: e.target.value }, tr("Название"))} />
+          <input className="title-input" defaultValue={t[nameKey()] ?? ""} key={way.id + nameKey() + (t[nameKey()] ?? "")} placeholder={nameOf(t) || kind} title={tr("Название, можно изменить")} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} onBlur={(e) => e.target.value !== (t[nameKey()] ?? "") && change({ [nameKey()]: e.target.value }, tr("Название"))} />
         </Head>
         <div className="sub">{kind} · {way.nodeIds.length} {" "}{tr("узлов ·")}{" "}{building ? tr("площадь застройки {0} м²", fmt(areaM2(data, way))) : tr("{0} м", fmt(wayLengthM(data, way)))}</div>
       </div>
@@ -596,7 +596,8 @@ function NumField({ label, value, onSave }: { label: string; value: string; onSa
   return (
     <>
       <span>{label}</span>
-      <input type="number" min="0" step="1" defaultValue={value} key={value} onBlur={(e) => e.target.value !== value && onSave(e.target.value)} />
+      {/* сохраняется по Enter или когда поле теряет фокус */}
+      <input type="number" min="0" step="1" defaultValue={value} key={value} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} onBlur={(e) => e.target.value !== value && onSave(e.target.value)} />
     </>
   );
 }
