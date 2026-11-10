@@ -87,15 +87,26 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   }
 
   // сетка отрезков для быстрого поиска соседей
-  const CELL = 40, grid = new Map<string, number[]>();
+  // Короткий отрезок кладем во все клетки его рамки (так быстрее). У длинного (дорога между городами)
+  // рамка - это миллионы клеток и программа падала, поэтому его клетки берем только вдоль линии:
+  // точки через 10 м, запас 17 м = 12 м поиска + половина шага.
+  const CELL = 40, STEP = 10, PAD = 17, grid = new Map<string, number[]>();
+  const put = (k: string, i: number) => { const c = grid.get(k); if (c) c.push(i); else grid.set(k, [i]); };
   segs.forEach((s, i) => {
     const a = xy(s[1]), c = xy(s[2]);
-    for (let gx = Math.floor((Math.min(a[0], c[0]) - 12) / CELL); gx <= Math.floor((Math.max(a[0], c[0]) + 12) / CELL); gx++)
-      for (let gy = Math.floor((Math.min(a[1], c[1]) - 12) / CELL); gy <= Math.floor((Math.max(a[1], c[1]) + 12) / CELL); gy++) {
-        const k = gx + ":" + gy;
-        if (!grid.has(k)) grid.set(k, []);
-        grid.get(k)!.push(i);
-      }
+    const gx0 = Math.floor((Math.min(a[0], c[0]) - 12) / CELL), gx1 = Math.floor((Math.max(a[0], c[0]) + 12) / CELL);
+    const gy0 = Math.floor((Math.min(a[1], c[1]) - 12) / CELL), gy1 = Math.floor((Math.max(a[1], c[1]) + 12) / CELL);
+    if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) <= 64) {
+      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) put(gx + ":" + gy, i);
+      return;
+    }
+    const steps = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / STEP);
+    const cells = new Set<string>();
+    for (let j = 0; j <= steps; j++) {
+      const x = a[0] + ((c[0] - a[0]) * j) / steps, y = a[1] + ((c[1] - a[1]) * j) / steps;
+      for (const dx of [-PAD, PAD]) for (const dy of [-PAD, PAD]) cells.add(Math.floor((x + dx) / CELL) + ":" + Math.floor((y + dy) / CELL));
+    }
+    for (const k of cells) put(k, i);
   });
 
   // 2. Разорванные перекрестки: конец дороги ближе 12 м к другой дороге, но не соединен

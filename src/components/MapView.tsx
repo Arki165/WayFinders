@@ -40,6 +40,10 @@ const makeStyle = (dark: boolean): maplibregl.StyleSpecification => ({
 
 maplibregl.setWorkerUrl(workerUrl);
 
+// Перетаскивание узла: с какого приближения можно и через сколько пикселей начинается
+const DRAG_MIN_ZOOM = 14;
+const DRAG_START_PX = 4;
+
 // Видимая область карты [юг, запад, север, восток] для загрузки района из OSM
 let currentMap: maplibregl.Map | null = null;
 export function getMapBounds(): [number, number, number, number] | null {
@@ -91,7 +95,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [zoom, setZoom] = useState(15);
   const [draw, setDraw] = useState<{ id: number | null; lat: number; lon: number }[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
-  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean } | null>(null);
+  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number] } | null>(null);
 
   const data = useEditor((s) => s.data);
   const original = useEditor((s) => s.original);
@@ -124,6 +128,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
 
     map.on("mousedown", (e) => {
       if (live.current.tool !== "select") return;
+      // при сильном отдалении узлы не таскаем: 1 пиксель там - километры, дрожание мыши уносило узел в другой город
+      if (map.getZoom() < DRAG_MIN_ZOOM) return;
       const info = pick(e.point.x, e.point.y, ["nodes", "signals"]);
       if (!info?.object) return;
       const id = (info.object as Pt).id;
@@ -131,14 +137,17 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       if (!n) return;
       e.preventDefault();
       map.dragPan.disable();
-      dragRef.current = { id, from: [n.lat, n.lon], moved: false };
+      dragRef.current = { id, from: [n.lat, n.lon], moved: false, start: [e.point.x, e.point.y] };
       useEditor.getState().select({ kind: "node", id });
     });
     map.on("mousemove", (e) => {
       const st = useEditor.getState();
-      if (dragRef.current && st.data) {
-        const n = st.data.nodes.get(dragRef.current.id);
-        if (n) { n.lat = e.lngLat.lat; n.lon = e.lngLat.lng; dragRef.current.moved = true; st.bump(); }
+      const dr = dragRef.current;
+      if (dr && st.data) {
+        // узел начинает двигаться, только когда мышь ушла дальше нескольких пикселей: обычный клик его не сдвигает
+        if (!dr.moved && Math.hypot(e.point.x - dr.start[0], e.point.y - dr.start[1]) < DRAG_START_PX) return;
+        const n = st.data.nodes.get(dr.id);
+        if (n) { n.lat = e.lngLat.lat; n.lon = e.lngLat.lng; dr.moved = true; st.bump(); }
         return;
       }
       if (live.current.tool === "draw" && live.current.draw.length) setCursor([e.lngLat.lng, e.lngLat.lat]);
