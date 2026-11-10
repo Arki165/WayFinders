@@ -4,6 +4,7 @@ import { useEditor, setWayTags } from "../model/store";
 import { calcWay, DEFAULT_NORMS, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
 import { saveCsv, savePng, toCsv } from "../model/exporting";
+import { flowCurve, flowPoint, FLOW_AXES, FLOW_SHORT, FLOW_TITLES, type FlowKind } from "../model/flow";
 import Icon from "./Icon";
 
 Chart.register(...registerables);
@@ -20,7 +21,10 @@ function compareRows(a: Row, b: Row, key: SortKey, dir: 1 | -1): number {
 }
 
 const fmt = (x: number | null, n = 0) => (x === null || !isFinite(x) ? "-" : x.toLocaleString("ru-RU", { minimumFractionDigits: n, maximumFractionDigits: n }));
-type ChartKind = "z" | "time" | "speed";
+// столбцы по участкам или диаграмма потока (модель + замеры)
+type ChartKind = "z" | "time" | "speed" | FlowKind;
+const FLOW_KINDS: FlowKind[] = ["Nq", "Vq", "DZ", "VN", "Dq", "Tt"];
+const isFlow = (k: ChartKind): k is FlowKind => (FLOW_KINDS as string[]).includes(k);
 
 export default function CalcPanel() {
   const data = useEditor((s) => s.data);
@@ -80,6 +84,38 @@ export default function CalcPanel() {
     const css = getComputedStyle(document.documentElement);
     const fg = css.getPropertyValue("--fg").trim(), muted = css.getPropertyValue("--muted").trim();
     const grid = css.getPropertyValue("--line").trim(), bg = css.getPropertyValue("--panel").trim();
+    const bgPlugin = { id: "bg", beforeDraw: (c: Chart) => { const ctx = c.ctx; ctx.save(); ctx.fillStyle = bg; ctx.fillRect(0, 0, c.width, c.height); ctx.restore(); } };
+    if (isFlow(kind)) {
+      // диаграмма потока: модельная кривая выбранного участка (или первого в таблице) и точки участков с замерами
+      const ref = rows.find((r) => selection?.kind === "way" && r.id === selection.id) ?? rows[0];
+      const pts = rows.map((r) => ({ r, p: flowPoint(kind, r.c) })).filter((x) => x.p);
+      const [ax, ay] = FLOW_AXES[kind];
+      chart.current = new Chart(canvas.current, {
+        type: "scatter",
+        data: {
+          datasets: [
+            { label: `Модель: ${ref.name}`, data: flowCurve(kind, ref.c), showLine: true, pointRadius: kind === "Tt" ? 3 : 0, borderColor: "rgba(31,111,209,.9)", backgroundColor: "rgba(31,111,209,.9)", borderWidth: 2, tension: 0.3 },
+            ...(pts.length ? [{ label: "Участки по замерам", data: pts.map((x) => ({ ...x.p!, name: x.r.name })), pointRadius: 5, backgroundColor: "rgba(216,64,47,.85)", borderColor: "rgba(216,64,47,1)" }] : []),
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { position: "bottom", labels: { color: fg, boxWidth: 12 } },
+            title: { display: true, color: fg, font: { weight: 600 }, text: FLOW_TITLES[kind] + (kind !== "Tt" && !pts.length ? " (замеров нет, только модель)" : "") },
+            tooltip: { callbacks: { label: (it) => { const p = it.raw as { x: number; y: number; name?: string }; return `${p.name ? p.name + ": " : ""}${ax.split(",")[0]} ${fmt(p.x, 1)}, ${ay.split(",")[0]} ${fmt(p.y, 1)}`; } } },
+          },
+          scales: {
+            x: { type: "linear", min: kind === "Tt" ? 0 : undefined, max: kind === "Tt" ? 23 : undefined, title: { display: true, text: ax, color: muted }, ticks: { color: muted, stepSize: kind === "Tt" ? 2 : undefined }, grid: { color: grid } },
+            y: { beginAtZero: true, title: { display: true, text: ay, color: muted }, ticks: { color: muted, callback: (v) => fmt(Number(v), Math.abs(Number(v)) < 10 && Number(v) % 1 ? 1 : 0) }, grid: { color: grid } },
+          },
+        },
+        plugins: [bgPlugin],
+      });
+      return;
+    }
     chart.current = new Chart(canvas.current, {
       type: "bar",
       data: { labels, datasets },
@@ -93,9 +129,9 @@ export default function CalcPanel() {
         },
         scales: { x: { ticks: { color: muted }, grid: { color: grid } }, y: { beginAtZero: true, ticks: { color: muted }, grid: { color: grid } } },
       },
-      plugins: [{ id: "bg", beforeDraw: (c) => { const ctx = c.ctx; ctx.save(); ctx.fillStyle = bg; ctx.fillRect(0, 0, c.width, c.height); ctx.restore(); } }],
+      plugins: [bgPlugin],
     });
-  }, [kind, version, norms, analysis.join(), theme, sort?.key, sort?.dir]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, version, norms, analysis.join(), theme, sort?.key, sort?.dir, selection]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => chart.current?.destroy(), []);
 
   if (!data) return <p className="hint pad">Откройте файл .osm</p>;
@@ -169,6 +205,11 @@ export default function CalcPanel() {
           <div className="seg">
             {([["z", "Загрузка Z"], ["time", "Время"], ["speed", "Скорость"]] as const).map(([k, l]) => <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>)}
           </div>
+          {/* диаграммы потока: модельная кривая выбранного участка и точки замеров */}
+          <select className={isFlow(kind) ? "on" : ""} value={isFlow(kind) ? kind : ""} onChange={(e) => e.target.value && setKind(e.target.value as FlowKind)} title="Диаграммы транспортного потока: модель для выбранного участка (или первого в таблице) и участки с замерами">
+            <option value="">Диаграммы потока...</option>
+            {FLOW_KINDS.map((k) => <option key={k} value={k}>{FLOW_SHORT[k]}: {FLOW_TITLES[k].split(": ").pop()}</option>)}
+          </select>
           <button disabled={!rows.length} onClick={() => canvas.current && savePng(fileName.replace(/\.osm$/i, "") + `_${kind}.png`, canvas.current)}><Icon name="download" size={14} />PNG</button>
         </div>
         <div className="chart-box"><canvas ref={canvas} />{!rows.length && <p className="hint center">Здесь будет график по участкам из таблицы</p>}</div>
