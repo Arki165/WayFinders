@@ -496,3 +496,7 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 /* руководство пользователя */
 .dialog.guide { width: min(560px, 100%); }
 .guide-head { display: flex; align-items: center; justify-content: space-between; }
+
+/* кнопка «Вернуться к графу» при сильном отдалении карты */
+.back-to { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 3; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-weight: 600; box-shadow: var(--shadow); cursor: pointer; }
+.back-to:hover { background: var(--panel-3); }

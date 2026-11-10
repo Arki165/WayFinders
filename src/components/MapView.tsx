@@ -18,6 +18,7 @@ const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind
 const POI_TEXT: Record<PoiKind, string> = { get crossing() { return tr("Пешеходный переход"); }, get bus() { return tr("Автобусная остановка"); }, get tram() { return tr("Трамвайная остановка"); }, get train() { return tr("Ж/д станция или платформа"); }, get metro() { return tr("Станция метро"); }, get entrance() { return tr("Вход в метро"); } };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
 import { getRoute, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
+import Icon from "./Icon";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmData, OsmWay } from "../osm/types";
@@ -142,15 +143,39 @@ class FitAllControl implements maplibregl.IControl {
     btn.setAttribute("aria-label", tr("Показать весь граф"));
     // та же иконка, что fitAll в Icon.tsx
     btn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-    btn.onclick = () => {
-      const b = useEditor.getState().data?.bounds;
-      if (b && currentMap) currentMap.fitBounds([[b.minlon, b.minlat], [b.maxlon, b.maxlat]], { padding: 30, duration: 600 });
-    };
+    btn.onclick = fitWholeGraph;
     box.appendChild(btn);
     this.box = box;
     return box;
   }
   onRemove() { this.box?.remove(); }
+}
+
+// Показать весь граф. Если в файле нет границ (новая или сшитая карта), считаем их по узлам дорог
+function fitWholeGraph() {
+  const d = useEditor.getState().data;
+  if (!d || !currentMap) return;
+  let b = d.bounds;
+  if (!b) {
+    let s = 90, w = 180, n = -90, e = -180;
+    for (const x of d.nodes.values()) { s = Math.min(s, x.lat); n = Math.max(n, x.lat); w = Math.min(w, x.lon); e = Math.max(e, x.lon); }
+    if (s > n) return;
+    b = { minlat: s, minlon: w, maxlat: n, maxlon: e };
+  }
+  currentMap.fitBounds([[b.minlon, b.minlat], [b.maxlon, b.maxlat]], { padding: 30, duration: 900 });
+}
+
+// Вернуться к выбранной дороге или узлу; если ничего не выбрано - ко всему графу
+function backToSelection() {
+  const st = useEditor.getState(), d = st.data, sel = st.selection;
+  if (!d || !currentMap || !sel) return fitWholeGraph();
+  const ids = sel.kind === "node" ? [] : sel.kind === "way" ? [sel.id] : sel.ids;
+  const pts = sel.kind === "node" ? [d.nodes.get(sel.id)] : ids.flatMap((id) => (d.ways.get(id)?.nodeIds ?? []).map((n) => d.nodes.get(n)));
+  const ok = pts.filter(Boolean) as { lat: number; lon: number }[];
+  if (!ok.length) return fitWholeGraph();
+  if (ok.length === 1) return st.flyTo(ok[0].lat, ok[0].lon, 17);
+  const lats = ok.map((p) => p.lat), lons = ok.map((p) => p.lon);
+  st.fitTo([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]);
 }
 
 export function getMapBounds(): [number, number, number, number] | null {
@@ -888,6 +913,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const overlay = overlayRef.current;
     if (!overlay) return;
     if (!data || !layersData || !lists) { overlay.setProps({ layers: [] }); return; }
+    // На глобусе слой графа не рисуем: deck.gl считает координаты на плоской карте,
+    // и круги ошибок и узлы улетали мимо шара. В таком масштабе город все равно меньше точки.
+    if (zoom < GLOBE_ZOOM) { overlay.setProps({ layers: [] }); return; }
     const selWay = selection?.kind === "way" ? data.ways.get(selection.id) : undefined;
     const selIds = new Set(selection?.kind === "ways" ? selection.ids : []);
     const section = selection?.kind === "ways" && selection.section ? selection.section : null;
@@ -1049,6 +1077,12 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         <MapHint text={hint[tool]} />
         {children}
       </div>}
+      {/* сильно отдалились (глобус, страна): кнопка вернуться к выбранному или ко всему графу */}
+      {data && zoom < 9 && (
+        <button className="back-to" onClick={backToSelection}>
+          <Icon name="fitAll" size={15} />{selection ? tr("Вернуться к выбранному") : tr("Вернуться к графу")}
+        </button>
+      )}
       {data && <LayersPanel level={level} show={show} onLevel={setLevel} onShow={setShow} metroCount={layersData?.metroCount ?? 0} />}
       {data && showChanges && (
         <div className="legend">
