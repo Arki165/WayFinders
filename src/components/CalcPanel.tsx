@@ -101,6 +101,8 @@ export default function CalcPanel() {
   if (!data) return <p className="hint pad">Откройте файл .osm</p>;
 
   const selWay = selection?.kind === "way" ? data.ways.get(selection.id) : undefined;
+  // несколько выделенных дорог (Shift+клик или участок между узлами): проезжие, которых еще нет в таблице
+  const selMany = selection?.kind === "ways" ? selection.ids.filter((id) => { const w = data.ways.get(id); return w && isDrivable(w) && !analysis.includes(id); }) : [];
   const addMajor = () => {
     const list = [...data.ways.values()].filter((w) => isDrivable(w) && ["primary", "secondary", "tertiary", "trunk"].includes(w.tags.highway)).map((w) => w.id);
     setAnalysis([...new Set([...analysis, ...list])]);
@@ -122,6 +124,7 @@ export default function CalcPanel() {
       <div className="calc-left">
         <div className="chips">
           {selWay && isDrivable(selWay) && !analysis.includes(selWay.id) && <button className="on" onClick={() => setAnalysis([...analysis, selWay.id])}><Icon name="plus" size={14} />Выделенная: {wayName(selWay)}</button>}
+          {selMany.length > 0 && <button className="on" onClick={() => setAnalysis([...analysis, ...selMany])}><Icon name="plus" size={14} />Выделенные: {selMany.length}</button>}
           <button onClick={addMajor}><Icon name="plus" size={14} />Все крупные улицы</button>
           {rows.length > 0 && <button onClick={() => setAnalysis([])}>Очистить</button>}
           <button onClick={exportCsv} disabled={!rows.length}><Icon name="download" size={14} />CSV</button>

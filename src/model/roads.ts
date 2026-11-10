@@ -32,7 +32,7 @@ export const roadClass = (w: OsmWay): RoadClass => ROAD_CLASSES[w.tags.highway] 
 
 // Группы классов для выбора в панели: улицы города (СП 42.13330) и дороги общего пользования вне города (ГОСТ Р 52398).
 // У дорог общего пользования категория хранится в своем теге, класс OSM подбирается по ней.
-export const CITY_CLASSES = ["trunk", "primary", "secondary", "tertiary", "residential", "living_street", "service", "primary_link", "unclassified"];
+export const CITY_CLASSES = ["trunk", "primary", "secondary", "tertiary", "residential", "living_street", "service", "primary_link"];
 export const CATEGORY_KEY = "wayfinders:category";
 // Классификация по расчетной интенсивности движения, прив. ед./сут (ГОСТ Р 52398, таблица 1)
 export const ROAD_CATEGORIES: { id: string; cat: string; cls: string; ru: string; flow: string; highway: string; lanes: number; speed: number }[] = [

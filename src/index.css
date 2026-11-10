@@ -193,7 +193,7 @@ h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; text-transform: upperca
 .work { display: grid; grid-template-columns: 54px minmax(0, 1fr) 360px; min-height: 0; }
 
 /* инструменты слева: иконка и клавиша под ней */
-.tools { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+.tools { display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
 .tool { width: 42px; height: 46px; padding: 0; display: flex; flex-direction: column; gap: 2px; border-color: transparent; background: transparent; color: var(--fg); flex: none; }
 .tool:hover:not(:disabled) { border-color: var(--line); }
 .tool kbd { font-size: 10px; line-height: 1; }

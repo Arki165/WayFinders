@@ -96,7 +96,6 @@ export default function LanePanel({ way }: { way: OsmWay }) {
           </select>
         </div>
       )}
-      <p className="hint">Хранится в тегах OSM по полосам через «|»: turn:lanes (повороты), change:lanes (разметка), bus:lanes, bicycle:lanes, maxspeed:lanes, width:lanes. Их читают SUMO и MatSim.</p>
     </div>
   );
 }

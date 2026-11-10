@@ -136,7 +136,7 @@ function ClassPicker({ get, set }: Fields) {
         <div className="cls-menu">
           <div className="seg cls-tabs">
             <button className={group === "city" ? "on" : ""} onClick={() => setGroup("city")}>Улицы города</button>
-            <button className={group === "public" ? "on" : ""} onClick={() => setGroup("public")}>Общего пользования</button>
+            <button className={group === "public" ? "on" : ""} onClick={() => setGroup("public")}>Параметры класса</button>
           </div>
           {group === "city" && CITY_CLASSES.map((k) => (
             <button key={k} className={"cls-item" + (hw === k && !catInfo ? " on" : "")} onClick={() => pick({ highway: k }, ROAD_CLASSES[k].ru, [CATEGORY_KEY])}>
