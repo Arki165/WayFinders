@@ -178,7 +178,7 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
 
   // A - область поиска; extra - что еще скачать вместе с дорогами (например, саму границу города)
   const body = (head: string, extra = "") =>
-    `${head}(way["highway"](A);way["railway"~"tram|rail"](A);${withBuildings ? 'way["building"](A);' : ""}node["highway"~"traffic_signals|crossing|bus_stop"](A);relation["type"="restriction"](A);${extra});(._;>;);out meta;`;
+    `${head}(way["highway"](A);way["railway"~"tram|rail|subway"](A);${withBuildings ? 'way["building"](A);' : ""}node["highway"~"traffic_signals|crossing|bus_stop"](A);node["railway"~"station|halt|tram_stop|subway_entrance"](A);relation["route"="subway"](A);relation["type"="restriction"](A);${extra});(._;>;);out meta;`;
 
   // Скачать город по границе. Крупный - кусками, иначе одним запросом.
   async function downloadCity(c: CityChoice, signal: AbortSignal): Promise<Downloaded> {

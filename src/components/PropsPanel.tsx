@@ -15,6 +15,8 @@ import { calcWay } from "../model/calc";
 import { getMapBounds } from "./MapView";
 import type { OsmNode, OsmWay, Tags } from "../osm/types";
 import Icon from "./Icon";
+import LanePanel from "./LanePanel";
+import { BUS_LANE_KEYS } from "../model/lanes";
 
 const fmt = (x: number, n = 0) => x.toLocaleString("ru-RU", { minimumFractionDigits: n, maximumFractionDigits: n });
 const SPEEDS = ["20", "30", "40", "50", "60", "70", "80", "90", "110", "RU:urban"];
@@ -103,7 +105,7 @@ function RoadFields({ get, set }: Fields) {
       <span title="Выделенная полоса для автобусов">Автобусная полоса</span>
       <div className="seg">
         {([["no", "Нет"], ["right", "Справа"], ["both", "С двух сторон"]] as const).map(([v, l]) => (
-          <button key={v} className={bus === v ? "on" : ""} onClick={() => set(v === "no" ? {} : v === "right" ? { "busway:right": "lane", "lanes:bus": "1" } : { busway: "lane", "lanes:bus": "2" }, v === "no" ? "Автобусная полоса убрана" : "Автобусная полоса", v === "no" ? ["busway", "busway:right", "lanes:bus"] : v === "right" ? ["busway"] : ["busway:right"])}>{l}</button>
+          <button key={v} className={bus === v ? "on" : ""} onClick={() => set(v === "no" ? {} : v === "right" ? { "busway:right": "lane", "lanes:bus": "1" } : { busway: "lane", "lanes:bus": "2" }, v === "no" ? "Автобусная полоса убрана" : "Автобусная полоса", [...(v === "no" ? ["busway", "busway:right", "lanes:bus"] : v === "right" ? ["busway"] : ["busway:right"]), ...BUS_LANE_KEYS])}>{l}</button>
         ))}
       </div>
     </div>
@@ -203,6 +205,8 @@ function WayPanel({ way }: { way: OsmWay }) {
         <span title="Трамвайные пути по проезжей части. Концы сами стыкуются с путями рядом (до 15 м)">Трамвай по дороге</span>
         <button className={tram ? "on" : ""} onClick={() => setTramOnRoad(way.id, !tram)}>{tram ? "Есть" : "Нет"}</button>
       </div>
+
+      <LanePanel way={way} />
 
       <div className="mini-calc">
         <div><small>V своб</small><b>{fmt(c.Vfree)} км/ч</b><small>{c.kSurface !== 1 ? `${fmt(c.Vmax)} × ${c.kSurface}` : "по знаку"}</small></div>

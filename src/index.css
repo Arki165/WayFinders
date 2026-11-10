@@ -394,3 +394,28 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .resizer.x { top: 0; bottom: 0; left: 0; width: 6px; cursor: col-resize; }
 .resizer.y { left: 0; right: 0; top: 0; height: 6px; cursor: row-resize; }
 .resizer:hover, .resizer.drag { background: var(--accent); opacity: 0.5; }
+
+
+/* полосы дороги: схема поперек дороги */
+.lanes-box { display: flex; flex-direction: column; gap: 6px; }
+.lanes-strip { display: flex; gap: 2px; padding: 4px; background: #686c66; border-radius: var(--radius); overflow-x: auto; }
+.lane-btn { flex: 1 1 0; min-width: 34px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 2px; background: #858a83; color: #fff; border: 1px dashed rgba(255, 255, 255, 0.7); border-radius: 3px; }
+.lane-btn small { font-size: 12px; line-height: 1; }
+.lane-btn.k-bus { background: #b0554c; }
+.lane-btn.k-bicycle { background: #4d9460; }
+.lane-btn.on { background: var(--accent); border: 1px solid #fff; color: #fff; }
+:root[data-theme="dark"] .lanes-strip { background: #2b302c; }
+:root[data-theme="dark"] .lane-btn { background: #4a504b; }
+:root[data-theme="dark"] .lane-btn.k-bus { background: #8a4740; }
+:root[data-theme="dark"] .lane-btn.k-bicycle { background: #3d7049; }
+:root[data-theme="dark"] .lane-btn.on { background: var(--accent); }
+
+/* панель «Слои» на карте: справа под кнопками масштаба и «Весь граф» */
+.layers { position: absolute; right: 10px; top: 150px; z-index: 2; max-height: calc(100% - 160px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; max-width: 230px; box-shadow: var(--shadow); }
+.layers-head { border: 0; background: transparent; width: 100%; text-align: left; justify-content: flex-start; padding: 5px 9px; }
+.layers-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 9px 9px; min-height: 0; overflow-y: auto; }
+.layers-level { margin-bottom: 2px; }
+.layers-level button { flex: 1; }
+.layers-row { display: flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; }
+.layers-row img { width: 16px; height: 16px; }
+.layers-row i { width: 16px; height: 5px; border-radius: 3px; display: inline-block; }
