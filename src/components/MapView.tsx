@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, type DrawPoint, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, addWay, type DrawPoint, insertBuildingCorner, moveBuildingDone, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -274,7 +274,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [zoom, setZoom] = useState(15);
   const [draw, setDraw] = useState<DrawPoint[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
-  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number] } | null>(null);
+  // что тащим мышью: узел (id) или здание целиком (bld - его узлы и где они были, origin - точка, где нажали)
+  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] } } | null>(null);
 
   const data = useEditor((s) => s.data);
   const original = useEditor((s) => s.original);
@@ -381,8 +382,46 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     };
 
     map.on("mousedown", (e) => {
+      if (live.current.tool !== "select") return;
+      const st0 = useEditor.getState();
+      const sel = st0.selection;
+      const bw = sel?.kind === "way" ? st0.data?.ways.get(sel.id) : undefined;
+      // ---- выбранное здание: углы, середины стен и само здание ----
+      if (bw && bw.tags.building && map.getZoom() >= DRAG_MIN_ZOOM) {
+        const hit = pick(e.point.x, e.point.y, ["bld-corners", "bld-mids", "buildings"]);
+        const lid = hit?.layer?.id;
+        const o = hit?.object as { id?: number; index?: number; pos: [number, number] } | undefined;
+        if (lid === "bld-corners" && o?.id !== undefined) {
+          e.preventDefault();
+          // Shift+клик по углу убирает его
+          if (e.originalEvent.shiftKey) return removeBuildingCorner(bw.id, o.id);
+          const n = st0.data!.nodes.get(o.id)!;
+          map.dragPan.disable();
+          dragRef.current = { id: o.id, from: [n.lat, n.lon], moved: false, start: [e.point.x, e.point.y] };
+          return;
+        }
+        if (lid === "bld-mids" && o?.index !== undefined) {
+          // середина стены: появляется новый угол, его сразу можно тащить
+          e.preventDefault();
+          const id = insertBuildingCorner(bw.id, o.index, o.pos[1], o.pos[0]);
+          if (id === null) return;
+          map.dragPan.disable();
+          dragRef.current = { id, from: [o.pos[1], o.pos[0]], moved: false, start: [e.point.x, e.point.y] };
+          st0.select({ kind: "way", id: bw.id });
+          return;
+        }
+        if (lid === "buildings" && (hit?.object as { id: number }).id === bw.id && !e.originalEvent.shiftKey) {
+          // само здание: тащим все его узлы
+          e.preventDefault();
+          map.dragPan.disable();
+          const from = new Map<number, [number, number]>();
+          for (const id of bw.nodeIds) { const n = st0.data!.nodes.get(id); if (n) from.set(id, [n.lat, n.lon]); }
+          dragRef.current = { id: -1, from: [0, 0], moved: false, start: [e.point.x, e.point.y], bld: { wayId: bw.id, from, origin: [e.lngLat.lng, e.lngLat.lat] } };
+          return;
+        }
+      }
       // с Shift узел не таскаем: Shift+клик выделяет участок между узлами
-      if (live.current.tool !== "select" || e.originalEvent.shiftKey) return;
+      if (e.originalEvent.shiftKey) return;
       // при сильном отдалении узлы не таскаем: 1 пиксель там - километры, дрожание мыши уносило узел в другой город
       if (map.getZoom() < DRAG_MIN_ZOOM) return;
       const info = pick(e.point.x, e.point.y, ["nodes", "signals", "signal-icons", "pois"]);
@@ -401,6 +440,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       if (dr && st.data) {
         // узел начинает двигаться, только когда мышь ушла дальше нескольких пикселей: обычный клик его не сдвигает
         if (!dr.moved && Math.hypot(e.point.x - dr.start[0], e.point.y - dr.start[1]) < DRAG_START_PX) return;
+        if (dr.bld) {
+          // здание сдвигается на столько, на сколько ушла мышь от точки нажатия
+          const dLon = e.lngLat.lng - dr.bld.origin[0], dLat = e.lngLat.lat - dr.bld.origin[1];
+          for (const [id, [lat, lon]] of dr.bld.from) { const p = st.data.nodes.get(id); if (p) { p.lat = lat + dLat; p.lon = lon + dLon; } }
+          dr.moved = true;
+          st.bump();
+          return;
+        }
         const n = st.data.nodes.get(dr.id);
         if (n) { n.lat = e.lngLat.lat; n.lon = e.lngLat.lng; dr.moved = true; st.bump(); }
         return;
@@ -416,7 +463,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       if (!dr) return;
       dragRef.current = null;
       map.dragPan.enable();
-      if (dr.moved) moveNodeDone(dr.id, dr.from);
+      if (dr.moved && dr.bld) moveBuildingDone(dr.bld.wayId, dr.bld.from);
+      else if (dr.moved) moveNodeDone(dr.id, dr.from);
     });
 
     map.on("click", (e) => {
@@ -428,6 +476,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       const onNode = pick(e.point.x, e.point.y, ["nodes", "signals", "signal-icons", "pois"]);
       const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, t === "delete" ? ["roads", "lanes", "others", "crossings", "transit", "buildings"] : ["roads", "lanes", "others", "crossings", "transit"]);
       const layer = info?.layer?.id;
+      // ручки здания обрабатывает нажатие мыши (mousedown), клик по ним выделение не снимает
+      if (layer === "bld-corners" || layer === "bld-mids") return;
       const obj = info?.object as (RoadItem & Pt & LaneItem & { key: string }) | undefined;
       if (layer === "errors" && obj) {
         const er = st.check?.errors.find((x) => x.key === obj.key);
@@ -859,6 +909,22 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     // круг пешей доступности у выбранной остановки: 350 м автобус и троллейбус, 500 м трамвай
     const stopNode = selNode !== null ? data?.nodes.get(selNode) : undefined;
     const walkR = stopNode ? walkRadius(stopNode) : null;
+    // ручки выбранного здания: углы (тащить, Shift+клик - убрать) и середины стен (тащить - новый угол)
+    const bldSel = tool === "select" && selWay?.tags.building && zoom >= 14 ? selWay : undefined;
+    const corners: { id: number; pos: [number, number] }[] = [], mids: { index: number; pos: [number, number] }[] = [];
+    if (bldSel && data) {
+      bldSel.nodeIds.forEach((id, i) => {
+        const n = data.nodes.get(id);
+        if (!n) return;
+        if (i < bldSel.nodeIds.length - 1) corners.push({ id, pos: [n.lon, n.lat] });
+        const m = i > 0 ? data.nodes.get(bldSel.nodeIds[i - 1]) : undefined;
+        if (m) mids.push({ index: i, pos: [(m.lon + n.lon) / 2, (m.lat + n.lat) / 2] });
+      });
+    }
+    const handleLayers = [
+        new ScatterplotLayer({ id: "bld-mids", data: mids, getPosition: (d) => d.pos, getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 150], stroked: true, getLineColor: [255, 255, 255, 200], getLineWidth: 1, lineWidthUnits: "pixels", pickable: true, parameters: flat }),
+        new ScatterplotLayer({ id: "bld-corners", data: corners, getPosition: (d) => d.pos, getRadius: 6, radiusUnits: "pixels", getFillColor: [255, 255, 255, 255], stroked: true, getLineColor: [31, 111, 209, 255], getLineWidth: 2.5, lineWidthUnits: "pixels", pickable: true, parameters: flat }),
+    ];
     const pointLayers = [
         new ScatterplotLayer({ id: "walk-zone", data: stopNode && walkR ? [{ pos: [stopNode.lon, stopNode.lat], r: walkR }] : [], getPosition: (d) => d.pos as [number, number], getRadius: (d) => d.r, radiusUnits: "meters", filled: true, stroked: true, getFillColor: [31, 111, 209, dark ? 40 : 34], getLineColor: [31, 111, 209, 200], getLineWidth: 2, lineWidthUnits: "pixels", parameters: flat }),
         new ScatterplotLayer<Pt>({ id: "nodes", data: nodes, getPosition: (d) => d.pos, getRadius: (d) => (d.id === selNode ? 6 : 3.5), radiusUnits: "pixels", getFillColor: (d) => (d.id === selNode ? [31, 111, 209, 255] : [255, 255, 255, 255]), getLineColor: [31, 111, 209, 255], stroked: true, lineWidthMinPixels: 1.5, pickable: true, updateTriggers: { getRadius: selNode, getFillColor: selNode } }),
@@ -881,7 +947,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     ].map((l) => l.clone({ parameters: flat }));
     overlay.setProps({
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
-      layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers] : [buildingsLayer, ...groundLayers, ...pointLayers],
+      layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers, ...handleLayers] : [buildingsLayer, ...groundLayers, ...pointLayers, ...handleLayers],
     });
   }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark]);
 

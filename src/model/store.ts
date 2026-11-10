@@ -5,8 +5,9 @@ import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { loadNorms, saveNorms, type Norms } from "./calc";
 import { distM, makeProjection, project } from "./geo";
-import { buildingAt, buildingIndex, buildingsOnSegment, mayCrossBuildings } from "./buildings";
+import { buildingAt, buildingIndex, buildingsOnSegment, mayCrossBuildings, wayThroughBuilding } from "./buildings";
 import { isDrivable, lanesOf, roadClass, type Arm } from "./roads";
+import { roadWidth } from "./lanes";
 import type { CustomTemplate } from "./templates";
 
 // ways - несколько дорог (Shift+клик) или участок между двумя узлами (section)
@@ -202,7 +203,112 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
     return [w.nodeIds[i - 1], w.nodeIds[i + 1]].some((id) => { const m = id !== undefined ? d.nodes.get(id) : undefined; return !!m && buildingsOnSegment(ix, m, at).length > 0; });
   });
   if (bad) { ed().bump(); return ed().toast(THROUGH_BUILDING); }
-  ed().run("Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
+  // угол здания: здание не должно наехать на дорогу
+  n.lat = to[0]; n.lon = to[1];
+  const onRoad = buildingsOf(d, [nodeId]).some((b) => roadThroughBuilding(d, b));
+  n.lat = from[0]; n.lon = from[1];
+  if (onRoad) { ed().bump(); return ed().toast(BUILDING_ON_ROAD); }
+  const corner = buildingsOf(d, [nodeId]).length > 0;
+  ed().run(corner ? "Угол здания" : "Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
+}
+
+// ---------- редактор зданий ----------
+export const BUILDING_ON_ROAD = "Здание нельзя поставить на дорогу: сначала уберите или перенесите дорогу, либо сделайте ее мостом или аркой";
+
+const isBuilding = (w: OsmWay) => !!w.tags.building && w.tags.building !== "no";
+// здания, у которых есть хотя бы один из узлов ids
+function buildingsOf(d: OsmData, ids: number[]): OsmWay[] {
+  const set = new Set(ids);
+  return [...d.ways.values()].filter((w) => isBuilding(w) && w.nodeIds.some((id) => set.has(id)));
+}
+
+// Проходит ли сквозь здание b какая-нибудь дорога (мосты, тоннели и арки можно)
+function roadThroughBuilding(d: OsmData, b: OsmWay): boolean {
+  const ix = buildingIndex({ ...d, ways: new Map([[b.id, b]]) });
+  // сначала грубо: дороги, у которых хоть один узел рядом с прямоугольником здания
+  let s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
+  for (const id of b.nodeIds) { const p = d.nodes.get(id); if (p) { s = Math.min(s, p.lat); n = Math.max(n, p.lat); w = Math.min(w, p.lon); e = Math.max(e, p.lon); } }
+  const pad = 0.003; // около 300 м: длинный отрезок дороги может пересечь дом, хотя его концы далеко
+  for (const r of d.ways.values()) {
+    if (!isDrivable(r)) continue;
+    const near = r.nodeIds.some((id) => { const p = d.nodes.get(id); return !!p && p.lat > s - pad && p.lat < n + pad && p.lon > w - pad && p.lon < e + pad; });
+    if (!near || mayCrossBuildings(r)) continue;
+    if (wayThroughBuilding(d, ix, r)) return true;
+    // стена ближе половины ширины дороги: дом стоит на проезжей части, хотя ось дороги снаружи
+    if (wallOnRoad(d, b, r)) return true;
+  }
+  return false;
+}
+
+// Расстояние от стен здания b до оси дороги r меньше половины ширины проезжей части
+function wallOnRoad(d: OsmData, b: OsmWay, r: OsmWay): boolean {
+  const lat0 = d.nodes.get(b.nodeIds[0])?.lat ?? 0;
+  const kx = Math.cos((lat0 * Math.PI) / 180) * 111320, ky = 111320; // градусы в метры
+  const xy = (id: number): [number, number] | null => { const p = d.nodes.get(id); return p ? [p.lon * kx, p.lat * ky] : null; };
+  const half = roadWidth(r) / 2 - 0.3; // 30 см запаса: тротуар у стены - это нормально
+  // расстояние от точки p до отрезка a-c
+  const toSeg = (p: [number, number], a: [number, number], c: [number, number]) => {
+    const vx = c[0] - a[0], vy = c[1] - a[1], L2 = vx * vx + vy * vy || 1;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L2));
+    return Math.hypot(a[0] + vx * t - p[0], a[1] + vy * t - p[1]);
+  };
+  for (let i = 1; i < b.nodeIds.length; i++) {
+    const a = xy(b.nodeIds[i - 1]), c = xy(b.nodeIds[i]);
+    if (!a || !c) continue;
+    for (let j = 1; j < r.nodeIds.length; j++) {
+      const p = xy(r.nodeIds[j - 1]), q = xy(r.nodeIds[j]);
+      if (!p || !q) continue;
+      // отрезки не пересекаются (это ловит wayThroughBuilding), значит ближе всего концы одного к другому
+      if (Math.min(toSeg(a, p, q), toSeg(c, p, q), toSeg(p, a, c), toSeg(q, a, c)) < half) return true;
+    }
+  }
+  return false;
+}
+
+// Перенос здания целиком: узлы уже сдвинуты мышью, from - где они были. Записываем в историю или возвращаем
+export function moveBuildingDone(wayId: number, from: Map<number, [number, number]>) {
+  const d = ed().data!;
+  const b = d.ways.get(wayId);
+  if (!b) return;
+  const to = new Map([...from.keys()].map((id) => { const p = d.nodes.get(id)!; return [id, [p.lat, p.lon] as [number, number]]; }));
+  if (roadThroughBuilding(d, b)) {
+    for (const [id, [lat, lon]] of from) { const p = d.nodes.get(id)!; p.lat = lat; p.lon = lon; }
+    ed().bump();
+    return ed().toast(BUILDING_ON_ROAD);
+  }
+  for (const [id, [lat, lon]] of from) { const p = d.nodes.get(id)!; p.lat = lat; p.lon = lon; }
+  ed().run("Перенос здания", [], [...from.keys()], () => {
+    for (const [id, [lat, lon]] of to) { const p = d.nodes.get(id)!; p.lat = lat; p.lon = lon; }
+  });
+}
+
+// Новый угол здания между углами index-1 и index (точка на стене). Возвращает id нового узла
+export function insertBuildingCorner(wayId: number, index: number, lat: number, lon: number): number | null {
+  const d = ed().data!;
+  const b = d.ways.get(wayId);
+  if (!b || index < 1 || index >= b.nodeIds.length) return null;
+  const id = newId();
+  ed().run("Новый угол здания", [wayId], [], () => {
+    d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
+    b.nodeIds.splice(index, 0, id);
+  });
+  return id;
+}
+
+// Убрать угол здания (Shift+клик по углу). Меньше трех углов не бывает
+export function removeBuildingCorner(wayId: number, nodeId: number) {
+  const d = ed().data!;
+  const b = d.ways.get(wayId);
+  if (!b) return;
+  const ring = b.nodeIds.slice(0, -1); // контур замкнут: последний узел = первый
+  if (ring.length <= 3) return ed().toast("У здания должно остаться хотя бы три угла");
+  const left = ring.filter((id) => id !== nodeId);
+  // узел нужен еще где-то (у соседнего дома или дороги) - только убираем из этого здания
+  const shared = [...d.ways.values()].some((w) => w.id !== wayId && w.nodeIds.includes(nodeId));
+  ed().run("Угол здания убран", [wayId], [nodeId], () => {
+    b.nodeIds = [...left, left[0]];
+    if (!shared) d.nodes.delete(nodeId);
+  });
 }
 
 // Точка новой линии: id - существующий узел, onWay - точка прилипла к дороге (там появится общий узел)
