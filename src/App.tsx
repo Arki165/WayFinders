@@ -34,6 +34,15 @@ function loadLayout(): Layout {
   try { return JSON.parse(localStorage.getItem("layout") ?? "{}"); } catch { return {}; }
 }
 
+// Горячие клавиши для окна-подсказки: клавиши через пробел, затем что делают
+const HOTKEYS: [string, string][] = [
+  ["V", "Выбор, перетаскивание узлов"], ["W", "Нарисовать дорогу"], ["N", "Добавить узел"], ["J", "Соединить"], ["U", "Разъединить"],
+  ["T", "Светофор"], ["X", "Разрезать дорогу"], ["D", "Удалить кликом"], ["R", "Развернуть направление"], ["Del", "Удалить выделенное"],
+  ["Shift Клик", "Добавить к выделению"], ["Enter", "Закончить дорогу"], ["Esc", "Отмена, снять выделение"],
+  ["3", "2D или 3D"], ["H", "Загрузка Z на карте"], ["Ctrl Z", "Отменить"], ["Ctrl Y", "Повторить"],
+  ["Ctrl S", "Сохранить"], ["Ctrl O", "Открыть файл"], ["Ctrl F", "Поиск улицы"], ["?", "Этот список"],
+];
+
 export default function App() {
   const data = useEditor((s) => s.data);
   const fileName = useEditor((s) => s.fileName);
@@ -60,6 +69,7 @@ export default function App() {
   const [changesOn, setChangesOn] = useState(false);
   const [tpl, setTpl] = useState("secondary");
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   // тема запоминается между запусками
@@ -167,7 +177,8 @@ export default function App() {
       const sel = st.getState().selection;
       if ((k === "delete" || k === "backspace") && sel) { e.preventDefault(); return sel.kind === "way" ? deleteWay(sel.id) : sel.kind === "node" ? deleteNode(sel.id) : deleteWays(sel.ids); }
       if ((k === "r" || k === "к") && sel?.kind === "way") return reverseWay(sel.id);
-      if (k === "escape") { st.getState().select(null); st.getState().setHighlight([]); return setTool("select"); }
+      if (k === "?" || k === "/") return setKeysOpen((v) => !v);
+      if (k === "escape") { setKeysOpen(false); st.getState().select(null); st.getState().setHighlight([]); return setTool("select"); }
       if (k === "3") return setView3d((v) => !v);
       if (k === "h" || k === "р") return setHeat((v) => !v);
       const map: Record<string, Tool> = { v: "select", м: "select", w: "draw", ц: "draw", n: "node", т: "node", j: "join", о: "join", u: "unjoin", г: "unjoin", t: "signal", е: "signal", x: "split", ч: "split", d: "delete", в: "delete" };
@@ -314,10 +325,22 @@ export default function App() {
             <span className={crit ? "c-danger" : "c-ok"}>Критичных ошибок: {crit}</span>
             <span>Правок: {past.length}</span>
             <span className="grow" />
-            <span className="keys" title="Горячие клавиши">V выбор · W дорога · N узел · J соединить · U разъединить · T светофор · X разрезать · D удалить · R направление · Del удалить выделенное · 3 2D/3D · H загрузка · Ctrl+Z отмена</span>
+            <button className={"keys-btn" + (keysOpen ? " on" : "")} onClick={() => setKeysOpen(!keysOpen)} title="Список горячих клавиш (?)"><kbd>?</kbd>Горячие клавиши</button>
           </>
         ) : <span>Откройте файл .osm, пример или загрузите район из OpenStreetMap</span>}
       </footer>
+
+      {keysOpen && (
+        // список всех клавиш: открывается кнопкой справа внизу или клавишей «?», закрывается кликом мимо или Esc
+        <div className="keys-back" onClick={() => setKeysOpen(false)}>
+          <div className="keys-pop" onClick={(e) => e.stopPropagation()}>
+            <h3>Горячие клавиши</h3>
+            <dl>
+              {HOTKEYS.map(([k, t]) => <div key={k}><dt>{k.split(" ").map((x) => <kbd key={x}>{x}</kbd>)}</dt><dd>{t}</dd></div>)}
+            </dl>
+          </div>
+        </div>
+      )}
 
       {toastVisible && message && <div className="toast">{message.text}</div>}
       {dialog === "save" && data && <SaveDialog onClose={() => setDialog(null)} />}
