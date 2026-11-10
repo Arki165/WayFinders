@@ -291,7 +291,7 @@ function OtherPanel({ way }: { way: OsmWay }) {
         </>}>
           <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={kind} title="Название, можно изменить" onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
         </Head>
-        <div className="sub">{kind} · {way.nodeIds.length} узлов · {building ? `площадь ${fmt(areaM2(data, way))} м²` : `${fmt(wayLengthM(data, way))} м`}</div>
+        <div className="sub">{kind} · {way.nodeIds.length} узлов · {building ? `площадь застройки ${fmt(areaM2(data, way))} м²` : `${fmt(wayLengthM(data, way))} м`}</div>
       </div>
       {building && (
         <div className="form">
