@@ -257,6 +257,8 @@ const ICONS_ZOOM = 14.5;
 
 // Полосы и разметку рисуем с приближения, где линейка масштаба показывает 100 м (на широте Иркутска 14,55-15,55)
 const LANES_ZOOM = 14.5;
+// Круги ошибок - с масштаба около 500 м: при большем отдалении они сливаются в пятно и закрывают дороги
+const ERRORS_ZOOM = 13;
 
 interface Props {
   basemap: Basemap;
@@ -914,7 +916,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const metroData = show.metro ? layersData.metro : [];
     const stationNames = lists.stationNames;
     // на глобусе и отдалении круги ошибок сливаются в пятно: показываем их ближе
-    const errs = city && show.errors && zoom >= 9 ? check?.errors ?? [] : [];
+    const errs = city && show.errors && zoom >= ERRORS_ZOOM ? check?.errors ?? [] : [];
     const selPt = selNode !== null && data.nodes.has(selNode) ? [{ pos: [data.nodes.get(selNode)!.lon, data.nodes.get(selNode)!.lat] as [number, number] }] : [];
     const ghost: Rgba = dark ? [120, 130, 142, 80] : [110, 110, 105, 70]; // дороги на уровне «Метро»
 

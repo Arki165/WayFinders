@@ -169,6 +169,14 @@ export function canCross(l: Lane, cross: "L" | "R"): boolean | undefined {
   return travelSide(l, cross) === "L" ? l.changeLeft : l.changeRight;
 }
 
+// То же, но если разметка не задана - та, что рисуется на карте по умолчанию (см. markBetween).
+// undefined, если со стороны cross соседней полосы нет (край дороги).
+export function crossOrDefault(lanes: Lanes, i: number, cross: "L" | "R"): boolean | undefined {
+  const nb = lanes[cross === "L" ? i - 1 : i + 1];
+  if (!nb) return undefined;
+  return canCross(lanes[i], cross) ?? (lanes[i].dir !== nb.dir ? lanes.length <= 2 : true);
+}
+
 // Поставить разметку на линии между полосой i и соседом со стороны cross (у обоих полос сразу)
 export function setCross(lanes: Lanes, i: number, cross: "L" | "R", allow: boolean): Lanes {
   const r = lanes.map((l) => ({ ...l }));

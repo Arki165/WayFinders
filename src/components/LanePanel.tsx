@@ -1,6 +1,6 @@
 // Панель полос выбранной дороги: схема поперек дороги и свойства выбранной полосы
 import { setWayTags } from "../model/store";
-import { addLane, canCross, getLanes, lanesToTags, setCross, setDir, useLane, TURNS, LANE_WIDTH, type Lane, type LaneKind, type Lanes } from "../model/lanes";
+import { addLane, crossOrDefault, getLanes, lanesToTags, setCross, setDir, useLane, TURNS, LANE_WIDTH, type Lane, type LaneKind, type Lanes } from "../model/lanes";
 import { maxSpeed } from "../model/roads";
 import { DirIcon, TurnIcon } from "./turnIcons";
 import type { OsmWay } from "../osm/types";
@@ -69,7 +69,7 @@ export default function LanePanel({ way }: { way: OsmWay }) {
           </div>
           {(["left", "right"] as const).map((side) => {
             const nb = neighbor(side);
-            const allow = canCross(lane, crossOf(side));
+            const allow = crossOrDefault(lanes, index!, crossOf(side));
             return [
               <span key={side + "l"}>{side === "left" ? tr("Линия слева") : tr("Линия справа")}</span>,
               nb ? (

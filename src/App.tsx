@@ -52,6 +52,7 @@ export default function App() {
   const setTool = useEditor((s) => s.setTool);
   const check = useEditor((s) => s.check);
   const past = useEditor((s) => s.past);
+  const future = useEditor((s) => s.future);
   const message = useEditor((s) => s.message);
   const version = useEditor((s) => s.version);
   const st = useEditor;
@@ -229,7 +230,7 @@ export default function App() {
         </div>
         <div className="tb-group">
           <button className="tb-icon" onClick={() => st.getState().undo()} disabled={!past.length} title={tr("Отменить (Ctrl+Z)")}><Icon name="undo" /></button>
-          <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!data} title={tr("Повторить (Ctrl+Y)")}><Icon name="redo" /></button>
+          <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!future.length} title={tr("Повторить (Ctrl+Y)")}><Icon name="redo" /></button>
         </div>
         <StreetSearch onPick={() => setSide("props")} />
         <span className="grow" />
