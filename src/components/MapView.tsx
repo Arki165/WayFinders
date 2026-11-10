@@ -9,6 +9,7 @@ import { useEditor, addWay, deleteNode, deleteWay, moveNodeDone, setNodeTags, sp
 import { drivableNodeSet, isDrivable, isRoadSignal, lanesOf, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
+import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmWay } from "../osm/types";
 
 export type Basemap = "map" | "satellite";
@@ -59,10 +60,11 @@ interface Props {
   view3d: boolean;
   heat: boolean;
   showBuildings: boolean;
+  showChanges: boolean;
   drawTemplate: string;
 }
 
-export default function MapView({ basemap, view3d, heat, showBuildings, drawTemplate }: Props) {
+export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -261,6 +263,12 @@ export default function MapView({ basemap, view3d, heat, showBuildings, drawTemp
     return { roads, others, buildings, junctions, signals, arrows };
   }, [data, version, heat, norms, showBuildings, highlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---------- правки относительно исходного файла ----------
+  const changes = useMemo(() => {
+    if (!data || !original || !showChanges) return [];
+    return changedRoads(original, data);
+  }, [data, original, version, showChanges]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------- слои deck.gl ----------
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -279,6 +287,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, drawTemp
       layers: [
         new PolygonLayer({ id: "buildings", data: layersData.buildings, getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: [200, 196, 186, view3d ? 230 : 140], getLineColor: [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d }),
         new PathLayer({ id: "others", data: layersData.others, getPath: (d) => d.path, getColor: (d) => d.color, getWidth: (d) => d.width, widthUnits: "pixels" }),
+        // широкая цветная подложка под измененными дорогами
+        new PathLayer<ChangedRoad>({ id: "changes", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 14, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({ id: "roads-casing", data: layersData.roads, getPath: (d) => d.path, getColor: [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({
           id: "roads", data: layersData.roads, getPath: (d) => d.path,
@@ -294,7 +304,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, drawTemp
         new ScatterplotLayer({ id: "draw-pts", data: draw, getPosition: (d) => [d.lon, d.lat], getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 255] }),
       ],
     });
-  }, [layersData, selection, zoom, tool, check, draw, cursor, view3d, version, data]);
+  }, [layersData, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes]);
 
   const hint: Record<string, string> = {
     select: "Клик выделяет дорогу или узел. Узел можно перетащить. При сильном приближении видны все узлы.",
@@ -308,6 +318,13 @@ export default function MapView({ basemap, view3d, heat, showBuildings, drawTemp
     <div className="mapwrap">
       <div ref={box} className="map" />
       {data && <div className="maphint">{hint[tool]}</div>}
+      {data && showChanges && (
+        <div className="legend">
+          {changes.length === 0 ? "Правок пока нет" : (["added", "changed", "deleted"] as ChangeKind[]).map((k) => (
+            <span key={k}><i style={{ background: `rgb(${CHANGE_COLORS[k].slice(0, 3).join(",")})` }} />{CHANGE_TEXT[k]}: {changes.filter((c) => c.kind === k).length}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

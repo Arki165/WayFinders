@@ -40,6 +40,7 @@ export default function App() {
   const [view3d, setView3d] = useState(false);
   const [heat, setHeat] = useState(false);
   const [buildings, setBuildings] = useState(true);
+  const [changesOn, setChangesOn] = useState(false);
   const [tpl, setTpl] = useState("secondary");
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
@@ -169,6 +170,7 @@ export default function App() {
         </select>
         <button className={heat ? "on" : ""} onClick={() => setHeat(!heat)} title="Тепловая карта загрузки (H)">Загрузка Z</button>
         <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)}>Здания</button>
+        <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title="Показать на карте новые, измененные и удаленные дороги">Правки</button>
         <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
       </header>
 
@@ -182,7 +184,7 @@ export default function App() {
         </nav>
 
         <main className="center">
-          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} drawTemplate={tpl} />
+          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} />
           {tool === "draw" && (
             <div className="optbar">Шаблон новой дороги:
               <select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
