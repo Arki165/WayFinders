@@ -11,6 +11,7 @@ import { useEditor, deleteNode, deleteWay, reverseWay, type Tool } from "./model
 import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
+import { VERSION } from "./version";
 
 const TOOLS: { id: Tool; key: string; label: string; icon: string }[] = [
   { id: "select", key: "V", label: "Выбор и перенос", icon: "↖" },
@@ -151,7 +152,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <span className="logo">WayFinders</span>
+        <span className="logo" title="Версия программы">WayFinders <small className="ver">v{VERSION}</small></span>
         <button onClick={openFile} title="Открыть .osm (Ctrl+O)">Открыть</button>
         <button onClick={() => setDialog("import")}>Загрузить из OSM</button>
         <button onClick={() => setDialog("save")} disabled={!data} title="Сохранить (Ctrl+S)">Сохранить .osm</button>

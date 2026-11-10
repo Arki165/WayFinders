@@ -150,3 +150,11 @@ vite.config.ts.timestamp-*
 
 # сборки приложения
 release/
+
+# служебные файлы Windows и macOS
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# патчи, которые передаем друг другу для коммита
+*.patch
