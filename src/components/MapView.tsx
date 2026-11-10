@@ -21,12 +21,12 @@ import type { OsmData, OsmWay } from "../osm/types";
 export type Basemap = "map" | "satellite";
 
 // Цвета подложки. В темной теме светлую схему переворачиваем по яркости, но не до черного,
-// а в мягкий сине-серый; вода остается синей. В светлой подложка слегка приглушена, но не обесцвечена:
+// а в мягкий графит (как темные карты 2ГИС); вода остается синей. В светлой подложка слегка приглушена, но не обесцвечена:
 // здания на ней отличаются от земли оттенком, без цвета они пропадают.
-const bgColor = (dark: boolean) => (dark ? "#1a2027" : "#e9ebee");
+const bgColor = (dark: boolean) => (dark ? "#1c1e22" : "#e9ebee");
 function mapPaint(dark: boolean) {
   return dark
-    ? { "raster-opacity": 0.85, "raster-saturation": -0.55, "raster-hue-rotate": 180, "raster-brightness-min": 0.8, "raster-brightness-max": 0.16 }
+    ? { "raster-opacity": 0.9, "raster-saturation": -0.7, "raster-hue-rotate": 180, "raster-brightness-min": 0.74, "raster-brightness-max": 0.14 }
     : { "raster-opacity": 0.8, "raster-saturation": -0.45, "raster-hue-rotate": 0, "raster-brightness-min": 0.06, "raster-brightness-max": 1 };
 }
 
@@ -36,13 +36,50 @@ const makeStyle = (dark: boolean): maplibregl.StyleSpecification => ({
   sources: {
     map: { type: "raster", tiles: ["esri://World_Street_Map/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri, © OpenStreetMap" },
     satellite: { type: "raster", tiles: ["esri://World_Imagery/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri World Imagery" },
+    // рельеф для глобуса в 3D: высоты (terrarium) отдельно для поверхности и для теней
+    dem: { type: "raster-dem", tiles: [DEM_URL], encoding: "terrarium", tileSize: 256, maxzoom: 10, attribution: "Mapzen Terrain" },
+    "dem-shade": { type: "raster-dem", tiles: [DEM_URL], encoding: "terrarium", tileSize: 256, maxzoom: 10 },
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": bgColor(dark) } },
     { id: "map", type: "raster", source: "map", paint: mapPaint(dark) },
     { id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
+    { id: "shade", type: "hillshade", source: "dem-shade", layout: { visibility: "none" }, paint: shadePaint(dark) },
   ],
+  sky: skySpec(dark),
 });
+
+// ---------- глобус при сильном отдалении ----------
+// Дальше этого приближения карта натягивается на шар (как в 2ГИС), ближе - обычная плоская.
+// В 3D на шаре еще и небольшой рельеф. На уровне улиц рельефа нет: дороги рисуются по плоской земле.
+const GLOBE_ZOOM = 6;
+const DEM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+function shadePaint(dark: boolean) {
+  return dark
+    ? { "hillshade-shadow-color": "#0c0d10", "hillshade-highlight-color": "#4a4d58", "hillshade-accent-color": "#15161a", "hillshade-exaggeration": 0.45 }
+    : { "hillshade-shadow-color": "#6f7480", "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#8a8f99", "hillshade-exaggeration": 0.35 };
+}
+// свечение атмосферы вокруг шара, на плоской карте его нет
+function skySpec(dark: boolean): maplibregl.SkySpecification {
+  return {
+    "sky-color": dark ? "#1b2433" : "#a9c4e4",
+    "horizon-color": dark ? "#3b4a63" : "#dbe7f3",
+    "fog-color": dark ? "#1c1e22" : "#e9ebee",
+    "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, GLOBE_ZOOM - 1, 0.8, GLOBE_ZOOM, 0],
+  };
+}
+let globe3d = false; // 3D включено: на шаре показываем рельеф
+function applyGlobe() {
+  const map = currentMap;
+  if (!map || !map.getLayer("shade")) return;
+  const onGlobe = map.getZoom() < GLOBE_ZOOM;
+  const type = onGlobe ? "globe" : "mercator";
+  if (map.getProjection()?.type !== type) map.setProjection({ type });
+  const relief = onGlobe && globe3d;
+  map.setLayoutProperty("shade", "visibility", relief ? "visible" : "none");
+  if (relief && !map.getTerrain()) map.setTerrain({ source: "dem", exaggeration: 6 });
+  if (!relief && map.getTerrain()) map.setTerrain(null);
+}
 
 maplibregl.setWorkerUrl(workerUrl);
 
@@ -130,15 +167,18 @@ function applyDark() {
   map.setPaintProperty("map", "raster-hue-rotate", p["raster-hue-rotate"]);
   map.setPaintProperty("map", "raster-brightness-min", p["raster-brightness-min"]);
   map.setPaintProperty("map", "raster-brightness-max", p["raster-brightness-max"]);
+  if (map.getLayer("shade")) for (const [k, v] of Object.entries(shadePaint(darkMap))) map.setPaintProperty("shade", k as "hillshade-shadow-color", v as string);
+  map.setSky(skySpec(darkMap));
   map.triggerRepaint();
 }
 
 // В темной теме яркие дневные цвета дорог смешиваем с фоном, чтобы они не резали глаз
 type Rgba = [number, number, number, number];
-const DARK_BG = [26, 32, 39];
+const DARK_TINT = [62, 60, 80];
 function soften(c: Rgba, dark: boolean): Rgba {
   if (!dark) return c;
-  return [c[0] * 0.7 + DARK_BG[0] * 0.3, c[1] * 0.7 + DARK_BG[1] * 0.3, c[2] * 0.7 + DARK_BG[2] * 0.3, c[3]];
+  // смесь с приглушенным лавандово-серым: белые и желтые дороги не слепят, как на темной карте 2ГИС
+  return [c[0] * 0.62 + DARK_TINT[0] * 0.38, c[1] * 0.62 + DARK_TINT[1] * 0.38, c[2] * 0.62 + DARK_TINT[2] * 0.38, c[3]];
 }
 
 // Линия, сдвинутая вбок на off метров: off > 0 - вправо по ходу линии, off < 0 - влево
@@ -240,7 +280,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     currentMap = map;
     overlayRef.current = overlay;
     map.on("zoomend", () => setZoom(map.getZoom()));
-    map.on("load", applyDark); // уровень «Метро» мог остаться с прошлого запуска
+    map.on("load", () => { applyDark(); applyGlobe(); }); // уровень «Метро» мог остаться с прошлого запуска
+    map.on("zoom", applyGlobe); // шар или плоская карта по приближению
     map.on("moveend", () => { const b = map.getBounds(); setBbox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]); });
 
     const pick = (x: number, y: number, layerIds?: string[]) => overlay.pickObject({ x, y, radius: 6, layerIds });
@@ -398,7 +439,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     if (map.getLayer("map")) apply(); else map.once("load", apply);
   }, [basemap]);
   useEffect(() => { darkMap = dark; underground = level === "metro"; applyDark(); }, [dark, level]);
-  useEffect(() => { mapRef.current?.easeTo({ pitch: view3d ? 55 : 0, bearing: view3d ? -20 : 0, duration: 600 }); }, [view3d]);
+  useEffect(() => {
+    mapRef.current?.easeTo({ pitch: view3d ? 55 : 0, bearing: view3d ? -20 : 0, duration: 600 });
+    globe3d = view3d;
+    applyGlobe();
+  }, [view3d]);
   useEffect(() => {
     if (!focus || !mapRef.current) return;
     // рамка: показать объект целиком (например, всю улицу из поиска), но не ближе масштаба 17.5
@@ -582,7 +627,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const poiData = lists.pois;
     const metroData = show.metro ? layersData.metro : [];
     const stationNames = lists.stationNames;
-    const errs = city && show.errors ? check?.errors ?? [] : [];
+    // на глобусе и отдалении круги ошибок сливаются в пятно: показываем их ближе
+    const errs = city && show.errors && zoom >= 9 ? check?.errors ?? [] : [];
     const selPt = selNode !== null && data.nodes.has(selNode) ? [{ pos: [data.nodes.get(selNode)!.lon, data.nodes.get(selNode)!.lat] as [number, number] }] : [];
     const ghost: Rgba = dark ? [120, 130, 142, 80] : [110, 110, 105, 70]; // дороги на уровне «Метро»
 
@@ -591,14 +637,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const flat = { depthCompare: "always" as const, depthWriteEnabled: false };
     // вблизи (линейка 50 м и мельче) полосы как асфальт с яркой разметкой, дальше - цвет класса и бледная разметка
     const laneClose = zoom >= 15.6;
-    const buildingsLayer = new PolygonLayer({ id: "buildings", data: city ? layersData.buildings : [], getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 200] : dark ? [62, 72, 86, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140]), getLineColor: dark ? [92, 104, 120, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d, pickable: true, updateTriggers: { getFillColor: [selWay?.id, dark, view3d] } });
+    const buildingsLayer = new PolygonLayer({ id: "buildings", data: city ? layersData.buildings : [], getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 200] : dark ? [56, 58, 66, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140]), getLineColor: dark ? [84, 87, 98, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d, pickable: true, updateTriggers: { getFillColor: [selWay?.id, dark, view3d] } });
     const groundLayers = [
         // метро на уровне «Город»: тонкие линии под дорогами (оно под землей)
         new PathLayer({ id: "metro-under", data: city ? metroData : [], getPath: (d) => d.path, getColor: (d) => [...d.color, 130] as Rgba, getWidth: 3, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new PathLayer({ id: "others", data: othersData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => (d.id === selWay?.id ? d.width + 2 : d.width), widthUnits: "pixels", widthMinPixels: 1, pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight], getWidth: selWay?.id } }),
         // широкая цветная подложка под измененными дорогами
         new PathLayer<ChangedRoad>({ id: "changes", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 14, widthUnits: "pixels", capRounded: true, jointRounded: true }),
-        new PathLayer<RoadItem>({ id: "roads-casing", data: city ? roadsData : [], getPath: (d) => d.path, getColor: dark ? [10, 13, 17, 230] : [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
+        new PathLayer<RoadItem>({ id: "roads-casing", data: city ? roadsData : [], getPath: (d) => d.path, getColor: dark ? [14, 15, 18, 230] : [90, 90, 85, 200], getWidth: (d) => d.width + 1.6, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true }),
         new PathLayer<RoadItem>({
           id: "roads", data: roadsData, getPath: (d) => d.path,
           getColor: (d) => (d.id === selWay?.id || (selIds.has(d.id) && !section) ? [31, 111, 209, 255] : metroLvl ? ghost : soften(hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 2,
@@ -635,7 +681,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // правки поверх дорог: цветная линия по оси, видна на любом приближении
         new PathLayer<ChangedRoad>({ id: "changes-top", data: changes, getPath: (d) => d.path, getColor: (d) => CHANGE_COLORS[d.kind], getWidth: 4, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         // метро на уровне «Метро»: яркие линии с белой обводкой поверх бледного города
-        new PathLayer({ id: "metro-casing", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: dark ? [20, 24, 30, 255] : [255, 255, 255, 255], getWidth: 10, widthUnits: "pixels", capRounded: true, jointRounded: true, updateTriggers: { getColor: dark } }),
+        new PathLayer({ id: "metro-casing", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: dark ? [22, 23, 27, 255] : [255, 255, 255, 255], getWidth: 10, widthUnits: "pixels", capRounded: true, jointRounded: true, updateTriggers: { getColor: dark } }),
         new PathLayer({ id: "metro", data: metroLvl ? metroData : [], getPath: (d) => d.path, getColor: (d) => [...d.color, 255] as Rgba, getWidth: 6, widthUnits: "pixels", capRounded: true, jointRounded: true }),
         new IconLayer({ id: "arrows", data: zoom >= 16 && city && show.roads ? layersData.arrows : [], getPosition: (d) => d.pos, getIcon: () => ARROW_ICON, getAngle: (d) => d.angle, getSize: 12, sizeUnits: "pixels", getColor: dark ? [225, 230, 236, 230] : [40, 44, 50, 220], billboard: false }),
     ].map((l) => l.clone({ parameters: flat }));
@@ -647,7 +693,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
           : new ScatterplotLayer<Pt>({ id: "signals", data: signalsData, getPosition: (d) => d.pos, getRadius: 6, radiusUnits: "pixels", getFillColor: [229, 72, 63, 255], getLineColor: [255, 255, 255, 255], stroked: true, lineWidthMinPixels: 2, pickable: true }),
         // переходы, остановки, станции и входы в метро
         new IconLayer<Poi>({ id: "pois", data: iconAtlas ? poiData : [], getPosition: (d) => d.pos, iconAtlas: iconAtlas!, iconMapping: ICON_MAPPING_2X, getIcon: (d) => d.kind, getSize: (d) => (d.kind === "entrance" ? 16 : d.kind === "metro" ? 26 : zoom >= 16.5 ? 26 : 20), sizeUnits: "pixels", pickable: true, updateTriggers: { getSize: zoom >= 16.5 } }),
-        new TextLayer<Poi>({ id: "metro-names", data: stationNames, getPosition: (d) => d.pos, getText: (d) => d.name, getSize: 13, getPixelOffset: [0, 20], getColor: dark ? [235, 238, 242, 255] : [30, 30, 30, 255], outlineWidth: 3, outlineColor: dark ? [20, 24, 30, 255] : [255, 255, 255, 255], fontSettings: { sdf: true }, characterSet: "auto", fontWeight: 700, updateTriggers: { getColor: dark } }),
+        new TextLayer<Poi>({ id: "metro-names", data: stationNames, getPosition: (d) => d.pos, getText: (d) => d.name, getSize: 13, getPixelOffset: [0, 20], getColor: dark ? [235, 238, 242, 255] : [30, 30, 30, 255], outlineWidth: 3, outlineColor: dark ? [22, 23, 27, 255] : [255, 255, 255, 255], fontSettings: { sdf: true }, characterSet: "auto", fontWeight: 700, updateTriggers: { getColor: dark } }),
         // кольцо вокруг выбранного узла: видно и под значком
         new ScatterplotLayer({ id: "sel-ring", data: selPt, getPosition: (d) => d.pos, getRadius: 15, radiusUnits: "pixels", filled: false, stroked: true, getLineColor: [31, 111, 209, 255], lineWidthMinPixels: 3 }),
         new ScatterplotLayer({ id: "errors", data: errs, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => (d.type === "trap" || d.type === "isolated" ? 16 : 11), radiusUnits: "pixels", filled: true, getFillColor: (d) => (d.sev === "danger" ? [216, 64, 47, 40] : d.sev === "warn" ? [229, 154, 40, 40] : [61, 107, 143, 40]), getLineColor: (d) => (d.sev === "danger" ? [216, 64, 47, 255] : d.sev === "warn" ? [229, 154, 40, 255] : [61, 107, 143, 255]), stroked: true, lineWidthMinPixels: 2, pickable: true }),

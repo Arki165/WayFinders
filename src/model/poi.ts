@@ -28,10 +28,18 @@ export function poiKind(n: OsmNode): PoiKind | null {
 
 export function cityPois(data: OsmData): Poi[] {
   const out: Poi[] = [];
+  // место остановки трамвая на рельсах (stop_position) показываем, только если рядом нет платформы:
+  // иначе одна остановка видна двумя значками «Т»
+  const stopPos: Poi[] = [];
   for (const n of data.nodes.values()) {
     const kind = poiKind(n);
-    if (kind) out.push({ id: n.id, pos: [n.lon, n.lat], kind, name: n.tags.name ?? "" });
+    if (!kind) continue;
+    const p: Poi = { id: n.id, pos: [n.lon, n.lat], kind, name: n.tags.name ?? "" };
+    if (kind === "tram" && n.tags.public_transport === "stop_position") stopPos.push(p); else out.push(p);
   }
+  const platforms = out.filter((p) => p.kind === "tram");
+  const near = (a: Poi, b: Poi) => Math.hypot((a.pos[0] - b.pos[0]) * Math.cos((a.pos[1] * Math.PI) / 180), a.pos[1] - b.pos[1]) * M_LAT < 60;
+  for (const s of stopPos) if (!platforms.some((p) => near(p, s) && (!p.name || !s.name || p.name === s.name))) out.push(s);
   return out;
 }
 
