@@ -103,6 +103,16 @@ function soften(c: Rgba, dark: boolean): Rgba {
   return [c[0] * 0.7 + DARK_BG[0] * 0.3, c[1] * 0.7 + DARK_BG[1] * 0.3, c[2] * 0.7 + DARK_BG[2] * 0.3, c[3]];
 }
 
+// Линия, сдвинутая вбок на off метров: off > 0 - вправо по ходу линии, off < 0 - влево
+function offsetPath(path: [number, number][], off: number): [number, number][] {
+  const kx = 111320 * Math.cos((path[0][1] * Math.PI) / 180), ky = 110540;
+  return path.map((p, i) => {
+    const a = path[Math.max(0, i - 1)], b = path[Math.min(path.length - 1, i + 1)];
+    const dx = (b[0] - a[0]) * kx, dy = (b[1] - a[1]) * ky, l = Math.hypot(dx, dy) || 1;
+    return [p[0] + ((dy / l) * off) / kx, p[1] + ((-dx / l) * off) / ky];
+  });
+}
+
 type RoadItem ={ id: number; path: [number, number, number][]; color: [number, number, number, number]; width: number };
 type Pt = { id: number; pos: [number, number] };
 
@@ -200,7 +210,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // узел под курсором важнее круга ошибки вокруг него: иначе узел разорванного перекрестка не выбрать;
       // в инструментах правки круги ошибок вообще не перехватывают клики
       const onNode = pick(e.point.x, e.point.y, ["nodes", "signals"]);
-      const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, ["roads", "others", "crossings"]);
+      const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, t === "delete" ? ["roads", "others", "crossings", "transit", "buildings"] : ["roads", "others", "crossings", "transit"]);
       const layer = info?.layer?.id;
       const obj = info?.object as (RoadItem & Pt & { key: string }) | undefined;
       if (layer === "errors" && obj) {
@@ -209,7 +219,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         return;
       }
       const nodeId = layer === "nodes" || layer === "signals" ? obj!.id : null;
-      const wayId = layer === "roads" || layer === "others" || layer === "crossings" ? obj!.id : null;
+      const wayId = layer === "roads" || layer === "others" || layer === "crossings" || layer === "transit" || layer === "buildings" ? obj!.id : null;
       const shift = (e.originalEvent as MouseEvent).shiftKey;
       if (t === "select" && shift) {
         // Shift+клик: дорога добавляется к выделению, второй узел выделяет участок между узлами
@@ -281,8 +291,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     setCursor(null);
     if (pts.length < 2) return useEditor.getState().toast("Нужно минимум две точки");
     const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
+    if (tpl.kind === "area" && pts.length < 3) return useEditor.getState().toast("Для здания нужно минимум три угла");
     addWay(pts, tpl.tags);
-    useEditor.getState().toast(`Дорога добавлена по шаблону «${tpl.name}»`);
+    useEditor.getState().toast(tpl.kind === "area" ? "Здание добавлено. Этажность меняется справа" : `Добавлено по шаблону «${tpl.name}»`);
   }
 
   // Enter заканчивает дорогу, Esc отменяет рисование
@@ -321,7 +332,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const onRoad = drivableNodeSet(data);
     type Line = { id: number; path: [number, number][]; color: [number, number, number, number]; width: number };
     // переходы рисуются поверх дорог, остальные линии под ними
-    const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], buildings: { poly: [number, number][]; h: number }[] = [];
+    // transit - выделенные полосы общественного транспорта, рисуются поверх дорог
+    const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], transit: Line[] = [], buildings: { id: number; poly: [number, number][]; h: number }[] = [];
     const deg = new Map<number, number>();
     const hl = new Set(highlight);
     const ways = [...data.ways.values()];
@@ -338,9 +350,19 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (w.tags.tunnel === "yes") color = [color[0], color[1], color[2], 110];
         if (hl.has(w.id)) color = [150, 90, 220, 255];
         roads.push({ id: w.id, path, color, width: lanesOf(w) * 3.2 });
+        // автобусная полоса: красная полоса у края дороги (справа, слева или с двух сторон)
+        const t = w.tags, both = t.busway === "lane" || t["busway:both"] === "lane";
+        const sides = [...(both || t["busway:right"] === "lane" ? [1] : []), ...((both && t.oneway !== "yes") || t["busway:left"] === "lane" ? [-1] : [])];
+        if (sides.length && !heat) {
+          const flat = w.nodeIds.map(coord), off = Math.max(0, (lanesOf(w) * 3.2) / 2 - 1.6);
+          for (const sd of sides) transit.push({ id: w.id, path: offsetPath(flat, sd * off), color: [214, 48, 49, 235], width: 3 });
+        }
       } else if (w.tags.building && showBuildings) {
         const lv = parseFloat(w.tags["building:levels"] ?? "") || 3;
-        buildings.push({ poly: w.nodeIds.map(coord), h: lv * 3 });
+        buildings.push({ id: w.id, poly: w.nodeIds.map(coord), h: lv * 3 });
+      } else if (w.tags.railway === "tram" && w.tags.embedded === "yes") {
+        // трамвай по проезжей части виден поверх дороги
+        transit.push({ id: w.id, path: w.nodeIds.map(coord), color: hl.has(w.id) ? [150, 90, 220, 255] : [130, 70, 190, 240], width: 1.6 });
       } else if (w.tags.highway || w.tags.railway) {
         const rail = !!w.tags.railway;
         // рельсы и переходы толще: их выбирают кликом
@@ -365,7 +387,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         arrows.push({ pos: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], angle: ang });
       }
     }
-    return { roads, others, crossings, buildings, junctions, signals, arrows };
+    return { roads, others, crossings, transit, buildings, junctions, signals, arrows };
   }, [data, version, heat, norms, showBuildings, highlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- правки относительно исходного файла ----------
@@ -395,7 +417,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     // Плоские слои лежат на одной высоте: если сравнивать их глубину, в наклонном 3D они мерцают полосами.
     // Поэтому они рисуются просто по порядку, а глубину учитывают только объемные здания.
     const flat = { depthCompare: "always" as const, depthWriteEnabled: false };
-    const buildingsLayer = new PolygonLayer({ id: "buildings", data: layersData.buildings, getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: dark ? [62, 72, 86, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140], getLineColor: dark ? [92, 104, 120, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d });
+    const buildingsLayer = new PolygonLayer({ id: "buildings", data: layersData.buildings, getPolygon: (d) => d.poly, extruded: view3d, getElevation: (d) => d.h, getFillColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 200] : dark ? [62, 72, 86, view3d ? 235 : 190] : [200, 196, 186, view3d ? 230 : 140]), getLineColor: dark ? [92, 104, 120, 220] : [170, 165, 155, 200], lineWidthMinPixels: 0.5, stroked: !view3d, pickable: true, updateTriggers: { getFillColor: [selWay?.id, dark, view3d] } });
     const groundLayers = [
         new PathLayer({ id: "others", data: layersData.others, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => (d.id === selWay?.id ? d.width + 2 : d.width), widthUnits: "pixels", widthMinPixels: 1, pickable: true, updateTriggers: { getColor: [dark, selWay?.id], getWidth: selWay?.id } }),
         // широкая цветная подложка под измененными дорогами
@@ -407,6 +429,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
           capRounded: true, jointRounded: true, pickable: true, autoHighlight: true, highlightColor: [31, 111, 209, 120],
           updateTriggers: { getColor: [selWay?.id, version, dark, selection] },
         }),
+        // полосы общественного транспорта: ширина в метрах, но не тоньше 3 пикселей, чтобы было видно издалека
+        new PathLayer({ id: "transit", data: layersData.transit, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true, pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
         new PathLayer({ id: "crossings", data: layersData.crossings, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
         new TextLayer({ id: "arrows", data: zoom >= 16 ? layersData.arrows : [], getPosition: (d) => d.pos, getText: () => "▶", getAngle: (d) => d.angle, getSize: 11, getColor: dark ? [225, 230, 236, 220] : [40, 40, 40, 220], characterSet: ["▶"], billboard: false }),
     ].map((l) => l.clone({ parameters: flat }));

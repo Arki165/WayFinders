@@ -3,11 +3,11 @@ import "./props.css";
 import {
   useEditor, reverseWay, deleteWay, deleteWays, deleteNode, setNodeTags, setWayTags, unjoinNode, patchSelection,
   makeRoundabout, makeUturn, makeTurn, insertBridge, setCrossing, removeCrossing, flipCrossing, crossingOf,
-  templateFromWays, insertTemplate,
+  embeddedTram, setTramOnRoad, templateFromWays, insertTemplate,
 } from "../model/store";
 import {
-  ROAD_CLASSES, CITY_CLASSES, CLASS_HINT, ROAD_CATEGORIES, CATEGORY_KEY, SURFACES, SIGNAL_KEYS,
-  isDrivable, isSignalTagged, lanesOf, maxSpeed, nodeArms, phaseKey, sideRu, sideOf, azimuth, surfaceName, wayName, type Arm,
+  ROAD_CLASSES, CITY_CLASSES, CLASS_HINT, ROAD_CATEGORIES, CATEGORY_KEY, SURFACES, SIGNAL_KEYS, TRACKS,
+  isDrivable, isSignalTagged, isTrack, lanesOf, maxSpeed, nodeArms, phaseKey, sideRu, sideOf, azimuth, surfaceName, wayName, type Arm,
 } from "../model/roads";
 import { wayLengthM } from "../model/geo";
 import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } from "../model/templates";
@@ -183,6 +183,7 @@ function WayPanel({ way }: { way: OsmWay }) {
   const L = wayLengthM(data, way);
   const c = calcWay(data, way, norms);
   const inAnalysis = analysis.includes(way.id);
+  const tram = embeddedTram(data, way).length > 0;
 
   return (
     <div className="pane">
@@ -192,6 +193,11 @@ function WayPanel({ way }: { way: OsmWay }) {
       </div>
 
       <RoadFields get={(f) => f(way)} set={change} />
+      <div className="switch">
+        <span title="Трамвайные пути по проезжей части. Концы сами стыкуются с путями рядом (до 15 м)">Трамвай по дороге</span>
+        <button className={tram ? "on" : ""} onClick={() => setTramOnRoad(way.id, !tram)}>{tram ? "Есть" : "Нет"}</button>
+      </div>
+
       <div className="mini-calc">
         <div><small>V своб</small><b>{fmt(c.Vfree)} км/ч</b><small>{c.kSurface !== 1 ? `${fmt(c.Vmax)} × ${c.kSurface}` : "по знаку"}</small></div>
         <div><small>T своб</small><b>{fmt(c.Tfree, 2)} мин</b><small>L / V своб</small></div>
@@ -200,7 +206,7 @@ function WayPanel({ way }: { way: OsmWay }) {
 
       <h3>Шаблоны</h3>
       <div className="chips">
-        {Object.entries(TEMPLATES).map(([k, v]) => <button key={k} onClick={() => change(v.tags, "Шаблон: " + v.name, ["lanes:forward", "lanes:backward", CATEGORY_KEY])}>{v.name}</button>)}
+        {Object.entries(TEMPLATES).filter(([, v]) => !v.kind).map(([k, v]) => <button key={k} onClick={() => change(v.tags, "Шаблон: " + v.name, ["lanes:forward", "lanes:backward", CATEGORY_KEY])}>{v.name}</button>)}
       </div>
       <div className="chips">
         <button onClick={() => insertBridge(way.id)} title="Участок дороги 50 м над пересечением с другой дорогой (или в середине) становится мостом">🌉 Вставить мост</button>
@@ -252,20 +258,52 @@ function OtherPanel({ way }: { way: OsmWay }) {
   const data = useEditor((s) => s.data)!;
   const t = way.tags;
   const change = (patch: Tags, label: string, remove: string[] = []) => setWayTags(way.id, patched(t, patch, remove), label);
-  const kind = t.footway === "crossing" ? "Пешеходный переход" : t.highway ? "Пешеходная или служебная дорожка" : "Линия";
+  const building = !!t.building;
+  const kind = building ? "Здание" : isTrack(way) ? TRACKS[t.railway] : t.footway === "crossing" ? "Пешеходный переход" : t.highway ? "Пешеходная или служебная дорожка" : "Линия";
   return (
     <div className="pane">
       <div>
         <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={kind} onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
-        <div className="sub">{kind} · {way.nodeIds.length} узлов · {fmt(wayLengthM(data, way))} м</div>
+        <div className="sub">{kind} · {way.nodeIds.length} узлов · {building ? `площадь ${fmt(areaM2(data, way))} м²` : `${fmt(wayLengthM(data, way))} м`}</div>
       </div>
+      {building && (
+        <div className="form">
+          <NumField label="Этажей" value={t["building:levels"] ?? ""} onSave={(v) => change({ "building:levels": v }, "Этажность здания")} />
+          <span>Высота</span>
+          <span>около {fmt((parseFloat(t["building:levels"] ?? "") || 3) * 3)} м (3 м на этаж), так здание видно в 3D</span>
+        </div>
+      )}
+      {building && <p className="hint">Новое здание: инструмент «Нарисовать» (W), шаблон «Здание», кликайте углы, Enter - готово. Удалить: кнопка ниже, Delete или инструмент D.</p>}
+      {isTrack(way) && (
+        <div className="form">
+          <span>Вид</span>
+          <div className="seg">
+            {(["tram", "rail"] as const).map((k) => <button key={k} className={t.railway === k ? "on" : ""} onClick={() => change({ railway: k }, "Вид путей")} title={TRACKS[k]}>{k === "tram" ? "Трамвай" : "Ж/д"}</button>)}
+          </div>
+          {t.embedded === "yes" && <><span>Где</span><span>по проезжей части дороги</span></>}
+        </div>
+      )}
+      {isTrack(way) && <p className="hint">Рельсы рисуются инструментом «Нарисовать дорогу» (W) с шаблоном путей. Концы ближе 15 м к другим путям стыкуются сами, на пересечении с дорогой ставится переезд.</p>}
       <div className="chips">
-        <button onClick={() => reverseWay(way.id)}>Развернуть (R)</button>
+        {!building && <button onClick={() => reverseWay(way.id)}>Развернуть (R)</button>}
         <SaveTemplate ids={[way.id]} />
-        <button className="danger" onClick={() => deleteWay(way.id)}>Удалить</button>
+        <button className="danger" onClick={() => deleteWay(way.id)}>{building ? "Удалить здание" : "Удалить"}</button>
       </div>
     </div>
   );
+}
+
+// Площадь замкнутого контура в квадратных метрах (формула площади многоугольника)
+function areaM2(data: { nodes: Map<number, OsmNode> }, w: OsmWay): number {
+  const pts = w.nodeIds.map((id) => data.nodes.get(id)).filter(Boolean) as OsmNode[];
+  if (pts.length < 3) return 0;
+  const kx = 111320 * Math.cos((pts[0].lat * Math.PI) / 180), ky = 110540;
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    s += (a.lon * kx) * (b.lat * ky) - (b.lon * kx) * (a.lat * ky);
+  }
+  return Math.abs(s) / 2;
 }
 
 // ---------- узел ----------
@@ -573,7 +611,7 @@ function TemplateSketch({ tpl, size, mark }: { tpl: CustomTemplate; size: number
 function TemplateEditor({ tpl, onSave, onCancel }: { tpl: CustomTemplate; onSave: (t: CustomTemplate) => void; onCancel: () => void }) {
   const [t, setT] = useState<CustomTemplate>(() => JSON.parse(JSON.stringify(tpl)));
   const setLine = (i: number, f: (l: CustomTemplate["lines"][number]) => void) => setT((old) => { const n = JSON.parse(JSON.stringify(old)) as CustomTemplate; f(n.lines[i]); return n; });
-  const kinds: [string, string][] = [...Object.entries(ROAD_CLASSES).filter(([k]) => !k.endsWith("_link") || k === "primary_link").map(([k, v]): [string, string] => ["highway=" + k, v.ru])];
+  const kinds: [string, string][] = [...Object.entries(ROAD_CLASSES).filter(([k]) => !k.endsWith("_link") || k === "primary_link").map(([k, v]): [string, string] => ["highway=" + k, v.ru]), ["railway=tram", TRACKS.tram], ["railway=rail", TRACKS.rail]];
   const kindOf = (tags: Tags) => (tags.railway ? "railway=" + tags.railway : "highway=" + (tags.highway ?? "secondary"));
 
   return (

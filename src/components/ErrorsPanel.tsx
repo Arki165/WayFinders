@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useEditor, fixError, batch } from "../model/store";
+import { useEditor, fixError, fixAllTorn as fixAll } from "../model/store";
 import { wayName } from "../model/roads";
 import type { GraphError, Severity } from "../model/validate";
 
@@ -43,19 +43,9 @@ export default function ErrorsPanel() {
     if (e.ways.length && e.type !== "trap") st.select({ kind: "way", id: e.ways[0] });
     st.flyTo(e.lat, e.lon, e.type === "trap" ? 16.5 : 18);
   };
-  // все соединения записываются одной правкой: один Ctrl+Z отменяет их все
+  // все соединения - одна правка и один Ctrl+Z; граф проверяется один раз, а не после каждого разрыва
   const fixAllTorn = () => {
-    let n = 0;
-    batch("Соединены все разрывы", () => {
-      for (let i = 0; i < 200; i++) {
-        const e = useEditor.getState().check?.errors.find((x) => x.type === "torn");
-        if (!e) break;
-        const was = useEditor.getState().past.length;
-        fixError(e);
-        if (useEditor.getState().past.length === was) break; // этот разрыв не соединить автоматически
-        n++;
-      }
-    });
+    const n = fixAll();
     st.toast(`Соединено разрывов: ${n}. Отменить все сразу: Ctrl+Z`);
   };
   const pct = check.nodes ? (check.sccMain / check.nodes) * 100 : 100;

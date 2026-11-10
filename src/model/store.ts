@@ -182,15 +182,25 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
 export function addWay(points: { id: number | null; lat: number; lon: number }[], tags: Tags) {
   const d = ed().data!;
   let wid = 0;
-  ed().run("Новая дорога", [], [], () => {
-    const ids = points.map((p) => {
+  const track = !!tags.railway;
+  // рельсы могут получить переезды на дорогах, эти дороги нужны в снимке для отмены
+  ed().run(track ? "Новые пути" : tags.building ? "Новое здание" : "Новая дорога", track ? roadsNear(d, points) : [], [], () => {
+    const ids = points.map((p, i) => {
       if (p.id !== null) return p.id;
+      // рельсы сами стыкуются с соседними путями того же вида, если конец ближе 15 м
+      if (track && (i === 0 || i === points.length - 1)) {
+        const near = nearestNode(d, p.lat, p.lon, DOCK_M, (w) => w.tags.railway === tags.railway);
+        if (near !== null) return near;
+      }
       const id = newId();
       d.nodes.set(id, { id, lat: p.lat, lon: p.lon, tags: {}, attrs: {} });
       return id;
     });
+    // здание - замкнутый контур: последняя точка совпадает с первой
+    if (tags.building && ids.length >= 3) ids.push(ids[0]);
     wid = newId();
     d.ways.set(wid, { id: wid, nodeIds: ids, tags: { ...tags }, attrs: {} });
+    if (track) addLevelCrossings(d, d.ways.get(wid)!);
   });
   ed().select({ kind: "way", id: wid });
 }
@@ -355,34 +365,63 @@ export function unjoinNode(nodeId: number) {
   ed().toast(`Дороги в узле разъединены: ${ws.length}`);
 }
 
-export function fixError(e: GraphError) {
-  const d = ed().data!;
+// Соединить один разорванный перекресток: конец дороги встает на ближайший отрезок другой дороги.
+// Только меняет данные, без записи в историю. Возвращает false, если разрыв уже не найти.
+function tornFix(d: OsmData, e: GraphError): boolean {
+  if (e.node === undefined || !e.seg || !d.nodes.has(e.node)) return false;
+  const other = d.ways.get(e.ways[1]);
+  if (!other) return false;
+  const [a, b] = e.seg;
+  let idx = -1;
+  for (let i = 1; i < other.nodeIds.length; i++) {
+    const x = other.nodeIds[i - 1], y = other.nodeIds[i];
+    if ((x === a && y === b) || (x === b && y === a)) idx = i;
+  }
+  if (idx < 0) return false; // отрезок уже изменился (например, в него встал другой разрыв)
   const pr = makeProjection(e.lat, e.lon);
   const xy = (id: number): [number, number] => { const n = d.nodes.get(id)!; return pr.toXY(n.lat, n.lon); };
+  const pa = xy(other.nodeIds[idx - 1]), pb = xy(other.nodeIds[idx]);
+  const { q } = project(xy(e.node), pa, pb);
+  if (Math.hypot(q[0] - pa[0], q[1] - pa[1]) < 0.5) mergeInto(d, other.nodeIds[idx - 1], e.node);
+  else if (Math.hypot(q[0] - pb[0], q[1] - pb[1]) < 0.5) mergeInto(d, other.nodeIds[idx], e.node);
+  else {
+    const [lat, lon] = pr.toLatLon(q[0], q[1]);
+    const n = d.nodes.get(e.node)!;
+    n.lat = lat; n.lon = lon;
+    other.nodeIds.splice(idx, 0, e.node);
+  }
+  return true;
+}
+
+// Соединить все разрывы сразу. Раньше каждый разрыв был отдельной правкой с полной проверкой графа после нее:
+// на большой карте это сотни проверок подряд, и программа зависала. Теперь все разрывы соединяются за один проход
+// и граф проверяется один раз; если что-то осталось (два разрыва на одном отрезке), делается еще проход.
+export function fixAllTorn(): number {
+  let total = 0;
+  batch("Соединены все разрывы", () => {
+    for (let pass = 0; pass < 5; pass++) {
+      const d = ed().data;
+      const errs = ed().check?.errors.filter((x) => x.type === "torn") ?? [];
+      if (!d || !errs.length) break;
+      // какие дороги и узлы изменятся: нужны для отмены
+      const nodes = new Set<number>(), ends = new Set<number>(), ways = new Set<number>();
+      for (const e of errs) { if (e.node !== undefined) { nodes.add(e.node); ends.add(e.node); } for (const id of e.seg ?? []) nodes.add(id); ways.add(e.ways[1]); }
+      for (const w of d.ways.values()) if (w.nodeIds.some((id) => ends.has(id))) ways.add(w.id);
+      let done = 0;
+      ed().run("Соединение разрывов", [...ways], [...nodes], () => { for (const e of errs) if (tornFix(d, e)) done++; });
+      total += done;
+      if (!done) { useEditor.setState({ past: ed().past.slice(0, -1), log: ed().log.slice(1) }); break; } // пустую правку из истории убираем
+    }
+  });
+  return total;
+}
+
+export function fixError(e: GraphError) {
+  const d = ed().data!;
   if (e.type === "torn" && e.node !== undefined && e.seg) {
     const other = d.ways.get(e.ways[1]);
     if (!other) return;
-    const nodesTouched = [e.node, ...e.seg];
-    const waysTouched = [...new Set([...waysWithNode(d, e.node), other.id])];
-    ed().run("Соединение перекрестка", waysTouched, nodesTouched, () => {
-      const [a, b] = e.seg!;
-      let idx = -1;
-      for (let i = 1; i < other.nodeIds.length; i++) {
-        const x = other.nodeIds[i - 1], y = other.nodeIds[i];
-        if ((x === a && y === b) || (x === b && y === a)) idx = i;
-      }
-      if (idx < 0) return;
-      const pa = xy(other.nodeIds[idx - 1]), pb = xy(other.nodeIds[idx]);
-      const { q } = project(xy(e.node!), pa, pb);
-      if (Math.hypot(q[0] - pa[0], q[1] - pa[1]) < 0.5) mergeInto(d, other.nodeIds[idx - 1], e.node!);
-      else if (Math.hypot(q[0] - pb[0], q[1] - pb[1]) < 0.5) mergeInto(d, other.nodeIds[idx], e.node!);
-      else {
-        const [lat, lon] = pr.toLatLon(q[0], q[1]);
-        const n = d.nodes.get(e.node!)!;
-        n.lat = lat; n.lon = lon;
-        other.nodeIds.splice(idx, 0, e.node!);
-      }
-    });
+    ed().run("Соединение перекрестка", [...new Set([...waysWithNode(d, e.node), other.id])], [e.node, ...e.seg], () => { tornFix(d, e); });
   }
   if (e.type === "glued" && e.seg1 && e.seg2) {
     ed().run("Узел на пересечении", e.ways, [], () => {
@@ -406,6 +445,7 @@ export function fixError(e: GraphError) {
 }
 
 // ---------- общие помощники ----------
+const DOCK_M = 15; // рельсы стыкуются сами, если конец ближе 15 м
 type XY = [number, number];
 const unit = (v: XY): XY => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
 const angDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
@@ -418,6 +458,34 @@ function local(d: OsmData, lat: number, lon: number) {
     // новый узел в точке (x, y)
     add: (p: XY, tags: Tags = {}): number => { const [la, lo] = pr.toLatLon(p[0], -p[1]); const id = newId(); d.nodes.set(id, { id, lat: la, lon: lo, tags, attrs: {} }); return id; },
   };
+}
+
+// Ближайший узел подходящих линий не дальше max метров
+function nearestNode(d: OsmData, lat: number, lon: number, max: number, fit: (w: OsmWay) => boolean, skip: number[] = []): number | null {
+  let best: number | null = null, bd = max;
+  for (const w of d.ways.values()) {
+    if (!fit(w)) continue;
+    for (const id of w.nodeIds) {
+      const n = d.nodes.get(id);
+      if (!n || skip.includes(id) || Math.abs(n.lat - lat) > 0.0005) continue;
+      const dist = distM(lat, lon, n.lat, n.lon);
+      if (dist < bd) { bd = dist; best = id; }
+    }
+  }
+  return best;
+}
+
+// Проезжие дороги, рамка которых задевает рамку точек: их может пересечь новая линия.
+// Сравниваем рамки, а не узлы: длинный отрезок дороги может пройти поперек без узлов рядом.
+function roadsNear(d: OsmData, pts: { lat: number; lon: number }[]): number[] {
+  const lat0 = Math.min(...pts.map((p) => p.lat)), lat1 = Math.max(...pts.map((p) => p.lat));
+  const lon0 = Math.min(...pts.map((p) => p.lon)), lon1 = Math.max(...pts.map((p) => p.lon));
+  return [...d.ways.values()].filter((w) => {
+    if (!isDrivable(w)) return false;
+    let a = Infinity, b = -Infinity, c = Infinity, e = -Infinity;
+    for (const id of w.nodeIds) { const n = d.nodes.get(id); if (!n) continue; a = Math.min(a, n.lat); b = Math.max(b, n.lat); c = Math.min(c, n.lon); e = Math.max(e, n.lon); }
+    return b >= lat0 && a <= lat1 && e >= lon0 && c <= lon1;
+  }).map((w) => w.id);
 }
 
 // Где линия way пересекает проезжие дороги на том же уровне без общего узла
@@ -441,6 +509,22 @@ function crossingsOf(d: OsmData, way: OsmWay, P: (id: number) => XY) {
     }
   }
   return hits;
+}
+
+// Рельсы пересекают дорогу - ставим общий узел-переезд, иначе это ошибка «пересечение без узла»
+function addLevelCrossings(d: OsmData, track: OsmWay) {
+  const n0 = d.nodes.get(track.nodeIds[0])!;
+  const { P, add } = local(d, n0.lat, n0.lon);
+  const tag = track.tags.railway === "tram" ? "tram_level_crossing" : "level_crossing";
+  // вставляем с конца, чтобы номера отрезков рельсов не сдвигались
+  const hits = crossingsOf(d, track, P).sort((a, b) => b.i - a.i || b.t - a.t);
+  for (const h of hits) {
+    const id = add(h.p, { railway: tag });
+    track.nodeIds.splice(h.i, 0, id);
+    const n = d.nodes.get(id)!;
+    const seg = nearestSegment(d, h.road, n.lat, n.lon);
+    if (seg.idx > 0) h.road.nodeIds.splice(seg.idx, 0, id);
+  }
 }
 
 // ---------- несколько дорог и участок между узлами ----------
@@ -776,6 +860,40 @@ export function flipCrossing(nodeId: number) {
 
 export function crossingOf(nodeId: number): OsmWay | undefined {
   return crossingWays(ed().data!, nodeId)[0];
+}
+
+// ---------- трамвай по дороге ----------
+export const embeddedTram = (d: OsmData, road: OsmWay) => [...d.ways.values()].filter((t) => t.tags.railway === "tram" && t.tags.embedded === "yes" && t.nodeIds.filter((id) => road.nodeIds.includes(id)).length >= 2);
+
+export function setTramOnRoad(wayId: number, on: boolean) {
+  const d = ed().data!;
+  const w = d.ways.get(wayId);
+  if (!w) return;
+  const old = embeddedTram(d, w);
+  if (!on) {
+    ed().run("Трамвай убран с дороги", [wayId, ...old.map((t) => t.id)], [], () => {
+      for (const t of old) d.ways.delete(t.id);
+      const t = { ...w.tags }; delete t.embedded_rails; w.tags = t;
+    });
+    return;
+  }
+  if (old.length) return;
+  let docked = 0;
+  ed().run("Трамвай по дороге", [wayId], [], () => {
+    w.tags = { ...w.tags, embedded_rails: "tram" };
+    const ids = [...w.nodeIds];
+    // стыковка: концы путей тянем к ближайшим трамвайным путям не дальше 15 м
+    for (const atStart of [true, false]) {
+      const n = d.nodes.get(atStart ? ids[0] : ids[ids.length - 1])!;
+      const near = nearestNode(d, n.lat, n.lon, DOCK_M, (t) => t.tags.railway === "tram", ids);
+      if (near === null) continue;
+      if (atStart) ids.unshift(near); else ids.push(near);
+      docked++;
+    }
+    const id = newId();
+    d.ways.set(id, { id, nodeIds: ids, tags: { railway: "tram", embedded: "yes" }, attrs: {} });
+  });
+  ed().toast(docked ? `Трамвайные пути по дороге проложены и состыкованы с соседними: ${docked}` : "Трамвайные пути проложены по дороге");
 }
 
 // ---------- свои шаблоны ----------

@@ -155,6 +155,9 @@ export function nodeArms(data: OsmData, nodeId: number): Arm[] {
   return arms.sort((a, b) => a.az - b.az);
 }
 
+// Рельсовые пути: трамвай и железная дорога
+export const TRACKS: Record<string, string> = { tram: "Трамвайные пути", rail: "Железная дорога", light_rail: "Легкое метро", subway: "Метро" };
+export const isTrack = (w: OsmWay) => !!w.tags.railway && w.tags.railway in TRACKS;
 
 export function wayName(w: OsmWay | undefined): string {
   if (!w) return "дорога";
