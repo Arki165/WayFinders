@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useEditor } from "../model/store";
+import { getOriginal, useEditor } from "../model/store";
 import { diffData, summary } from "../model/diff";
 import { validate } from "../model/validate";
 import { toCsv, saveCsv } from "../model/exporting";
@@ -15,8 +15,10 @@ export default function ComparePanel() {
   const flyTo = useEditor((s) => s.flyTo);
   const fileName = useEditor((s) => s.fileName);
 
-  const before = useMemo(() => (original ? { s: summary(original), v: validate(original) } : null), [original]);
-  const now = useMemo(() => (data ? { s: summary(data), d: diffData(original!, data) } : null), [data, original, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  // исходный граф собирается из текущего и списка правок (полную копию не храним)
+  const orig = useMemo(() => getOriginal(), [original, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const before = useMemo(() => (orig ? { s: summary(orig), v: validate(orig) } : null), [original]); // eslint-disable-line react-hooks/exhaustive-deps
+  const now = useMemo(() => (data ? { s: summary(data), d: diffData(orig!, data) } : null), [data, original, version]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data || !before || !now || !check) return <p className="hint pad">{tr("Откройте файл .osm")}</p>;
 
   const cnt = (errs: { sev: string }[], s: string) => errs.filter((e) => e.sev === s).length;

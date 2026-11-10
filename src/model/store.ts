@@ -1,7 +1,6 @@
 // Состояние редактора и все операции правки с отменой (Ctrl+Z)
 import { create } from "zustand";
 import type { OsmData, OsmNode, OsmRelation, OsmWay, Tags } from "../osm/types";
-import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { loadNorms, saveNorms, type Norms } from "./calc";
 import { distM, makeProjection, project } from "./geo";
@@ -27,7 +26,10 @@ interface Command {
 
 interface EditorState {
   data: OsmData | null;
-  original: OsmData | null; // исходник для сравнения "до / после"
+  // Исходник для сравнения «до / после». Полную копию графа не держим (на большом городе это
+  // удваивало память, и окно падало): запоминаем только исходный вид тех дорог, узлов и маршрутов,
+  // которые правили. Сам исходный граф собирает getOriginal(), когда он нужен.
+  original: OrigLog | null;
   fileName: string;
   filePath: string | null;
   selection: Selection;
@@ -75,6 +77,36 @@ function restore(d: OsmData, ws: WaySnap, ns: NodeSnap) {
 let nextId = -1;
 export const newId = () => nextId--;
 
+// Исходный вид измененных элементов: значение до первой правки, null - элемента не было
+export interface OrigLog {
+  nodes: Map<number, OsmNode | null>;
+  ways: Map<number, OsmWay | null>;
+  relations: Map<number, OsmRelation | null>;
+  loadedAt: number; // когда открыт файл: по нему карта один раз показывает весь граф
+}
+const newLog = (): OrigLog => ({ nodes: new Map(), ways: new Map(), relations: new Map(), loadedAt: Date.now() });
+
+// Был ли элемент в исходном файле (до всех правок)
+export function inOriginal(kind: "nodes" | "ways" | "relations", id: number): boolean {
+  const st = useEditor.getState(), log = st.original, d = st.data;
+  if (log?.[kind].has(id)) return log[kind].get(id) !== null;
+  return !!d?.[kind].has(id);
+}
+
+// Исходный граф: текущий, в котором измененные элементы заменены их исходным видом.
+// Не копирует объекты (только списки), поэтому быстрый и почти не занимает памяти. Только для чтения!
+export function getOriginal(): OsmData | null {
+  const { data: d, original: log } = useEditor.getState();
+  if (!d || !log) return null;
+  const put = <T,>(cur: Map<number, T>, changes: Map<number, T | null>) => {
+    if (!changes.size) return cur;
+    const m = new Map(cur);
+    for (const [id, v] of changes) { if (v) m.set(id, v); else m.delete(id); }
+    return m;
+  };
+  return { ...d, nodes: put(d.nodes, log.nodes), ways: put(d.ways, log.ways), relations: put(d.relations, log.relations) };
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   data: null,
   original: null,
@@ -96,7 +128,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   load: (data, fileName, filePath) => {
     nextId = -1;
-    set({ data, original: cloneData(data), fileName, filePath, selection: null, past: [], future: [], log: [], ignored: new Set(), analysis: [], highlight: [], version: get().version + 1 });
+    set({ data, original: newLog(), fileName, filePath, selection: null, past: [], future: [], log: [], ignored: new Set(), analysis: [], highlight: [], version: get().version + 1 });
     get().recheck();
   },
   select: (selection) => set({ selection }),
@@ -114,6 +146,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     const addedN = [...d.nodes.keys()].filter((id) => !newNodes.has(id));
     for (const id of addedW) beforeW.set(id, null);
     for (const id of addedN) beforeN.set(id, null);
+    // исходный вид: запоминаем только при первой правке элемента
+    const log = get().original;
+    if (log) {
+      for (const [id, w] of beforeW) if (!log.ways.has(id)) log.ways.set(id, w);
+      for (const [id, n] of beforeN) if (!log.nodes.has(id)) log.nodes.set(id, n);
+    }
     const afterW = snapWays(d, [...beforeW.keys()]), afterN = snapNodes(d, [...beforeN.keys()]);
     const cmd: Command = { label, time: new Date(), undo: () => restore(d, beforeW, beforeN), redo: () => restore(d, afterW, afterN) };
     set({ past: [...get().past, cmd], future: [], log: [{ label, time: cmd.time }, ...get().log] });
@@ -286,6 +324,7 @@ export function runRelation(label: string, relId: number, mutate: (d: OsmData) =
   const st = ed(), d = st.data;
   if (!d) return;
   const before = snapRel(d, relId);
+  if (st.original && !st.original.relations.has(relId)) st.original.relations.set(relId, before);
   mutate(d);
   const after = snapRel(d, relId);
   const cmd = { label, time: new Date(), undo: () => putRel(d, relId, before), redo: () => putRel(d, relId, after) };
@@ -1267,8 +1306,8 @@ export function insertTemplate(t: CustomTemplate, lat: number, lon: number) {
 // Если id совпал, а это другой элемент (например, новые дороги из разных сохраненных файлов), он получает новый id.
 // Дороги на стыке сшиваются в общий узел: концы ближе 1,5 м, узлы в середине дороги ближе 0,5 м.
 export function mergeMap(extra: OsmData, name: string) {
-  const st = ed(), d = st.data, orig = st.original;
-  if (!d || !orig) return null;
+  const st = ed(), d = st.data;
+  if (!d || !st.original) return null;
   const nodeMap = new Map<number, number>(), wayMap = new Map<number, number>();
   const addedNodes: number[] = [], addedWays: number[] = [];
 
@@ -1276,7 +1315,7 @@ export function mergeMap(extra: OsmData, name: string) {
     const old = d.nodes.get(n.id);
     if (old && distM(old.lat, old.lon, n.lat, n.lon) < 1) { nodeMap.set(n.id, n.id); continue; }
     // узел удален в редакторе - не возвращаем его
-    if (!old && orig.nodes.has(n.id)) continue;
+    if (!old && inOriginal("nodes", n.id)) continue;
     const id = old || n.id < 0 ? newId() : n.id;
     nodeMap.set(n.id, id);
     d.nodes.set(id, { ...n, id, tags: { ...n.tags }, attrs: { ...n.attrs } });
@@ -1286,7 +1325,7 @@ export function mergeMap(extra: OsmData, name: string) {
     const ids = w.nodeIds.map((x) => nodeMap.get(x)).filter((x): x is number => x !== undefined);
     if (ids.length < 2) continue;
     const old = d.ways.get(w.id);
-    if (!old && orig.ways.has(w.id)) continue; // удалена в редакторе
+    if (!old && inOriginal("ways", w.id)) continue; // удалена в редакторе
     if (old && old.nodeIds.some((x) => ids.includes(x))) { wayMap.set(w.id, w.id); continue; } // та же дорога
     const id = old || w.id < 0 ? newId() : w.id;
     wayMap.set(w.id, id);
@@ -1294,7 +1333,7 @@ export function mergeMap(extra: OsmData, name: string) {
     addedWays.push(id);
   }
   for (const r of extra.relations.values()) {
-    if (d.relations.has(r.id) || orig.relations.has(r.id)) continue;
+    if (d.relations.has(r.id) || inOriginal("relations", r.id)) continue;
     const members = r.members.map((m) => ({ ...m, ref: m.type === "node" ? nodeMap.get(m.ref) ?? m.ref : m.type === "way" ? wayMap.get(m.ref) ?? m.ref : m.ref }));
     d.relations.set(r.id, { ...r, members, tags: { ...r.tags }, attrs: { ...r.attrs } });
   }
@@ -1342,15 +1381,10 @@ export function mergeMap(extra: OsmData, name: string) {
   const b = d.bounds, e = extra.bounds;
   if (e) d.bounds = b ? { minlat: Math.min(b.minlat, e.minlat), minlon: Math.min(b.minlon, e.minlon), maxlat: Math.max(b.maxlat, e.maxlat), maxlon: Math.max(b.maxlon, e.maxlon) } : { ...e };
 
-  // присоединенная карта - часть исходника: «Сравнение» и «Правки» не считают ее правкой
-  const o = cloneData(orig);
-  for (const id of addedNodes) { const n = d.nodes.get(id); if (n) o.nodes.set(id, { ...n, tags: { ...n.tags }, attrs: { ...n.attrs } }); }
-  for (const id of addedWays) { const w = d.ways.get(id); if (w) o.ways.set(id, { ...w, nodeIds: [...w.nodeIds], tags: { ...w.tags }, attrs: { ...w.attrs } }); }
-  for (const [id, r] of d.relations) if (!o.relations.has(id)) o.relations.set(id, { ...r, members: r.members.map((m) => ({ ...m })), tags: { ...r.tags }, attrs: { ...r.attrs } });
-  o.bounds = d.bounds ? { ...d.bounds } : null;
-
+  // присоединенная карта - часть исходника: «Сравнение» и «Правки» не считают ее правкой.
+  // Новые элементы не попадают в список правок, значит они уже «исходные»
   const res = { nodes: addedNodes.length, ways: addedWays.length, stitched };
-  useEditor.setState({ original: o, log: [{ label: tr("Присоединена карта {0}: линий {1}, сшито на стыке {2}", name, res.ways, stitched), time: new Date() }, ...st.log] });
+  useEditor.setState({ original: { ...st.original }, log: [{ label: tr("Присоединена карта {0}: линий {1}, сшито на стыке {2}", name, res.ways, stitched), time: new Date() }, ...st.log] });
   ed().recheck();
   return res;
 }

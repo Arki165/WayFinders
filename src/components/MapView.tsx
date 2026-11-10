@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -883,7 +883,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // ---------- правки относительно исходного файла ----------
   const changes = useMemo(() => {
     if (!data || !original || !showChanges) return [];
-    return changedRoads(original, data);
+    const orig = getOriginal();
+    return orig ? changedRoads(orig, data) : [];
   }, [data, original, version, showChanges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- списки объектов для слоев по фильтрам «Слоев» ----------
