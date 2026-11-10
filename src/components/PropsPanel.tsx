@@ -11,6 +11,7 @@ import {
 } from "../model/roads";
 import { distM, wayLengthM } from "../model/geo";
 import { poiKind, walkRadius } from "../model/poi";
+import { routesAtNode, ROUTE_RU, useRoute } from "../model/routes";
 import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } from "../model/templates";
 import { calcWay, capacityPerLane, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { getMapBounds } from "./MapView";
@@ -352,9 +353,24 @@ function WalkZone({ node }: { node: OsmNode }) {
     }
     return n;
   }, [data, version, node.id, r]); // eslint-disable-line react-hooks/exhaustive-deps
+  const routes = useMemo(() => (r ? routesAtNode(data, node.id) : []), [data, version, node.id, r]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setRoute = useRoute((s) => s.set);
+  const routeId = useRoute((s) => s.id);
   if (!r) return null;
   return (
     <div className="walk-zone">
+      {routes.length > 0 && (
+        <>
+          <h3>Маршруты через остановку</h3>
+          <div className="route-chips">
+            {routes.map((x) => (
+              <button key={x.id} className={x.id === routeId ? "on" : ""} style={{ borderColor: `rgb(${x.color.join(",")})` }} onClick={() => setRoute(x.id === routeId ? null : x.id)} title={`${ROUTE_RU[x.kind]} ${x.ref}: ${x.name}. Показать на карте`}>
+                <i style={{ background: `rgb(${x.color.join(",")})` }} />{x.ref}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <h3>Пешая доступность</h3>
       <div className="walk-row"><i /><span>Зона пешей доступности: <b>{r} м</b></span></div>
       <p className="hint">Круг на карте: столько обычно проходят до остановки пешком ({kind === "tram" ? "норматив для трамвая 400-600 м" : "норматив для автобуса и троллейбуса 300-400 м"}, взято среднее). Домов в зоне: {houses}{houses === 0 ? " (здания не загружены или их нет рядом)" : ""}.</p>

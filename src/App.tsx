@@ -7,6 +7,7 @@ import CalcPanel from "./components/CalcPanel";
 import ComparePanel from "./components/ComparePanel";
 import FormulasPanel from "./components/FormulasPanel";
 import Resizer from "./components/Resizer";
+import RoutesPanel from "./components/RoutesPanel";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
 import { useEditor, deleteNode, deleteWay, deleteWays, reverseWay, mergeMap, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
@@ -29,7 +30,7 @@ const TOOLS: { id: Tool; key: string; label: string; icon: IconName; group?: tru
 ];
 
 // Сохраненная раскладка окна (какие панели открыты, их размеры, подложка)
-type Layout = { side?: "props" | "errors" | "history" | null; bottom?: "calc" | "compare" | "formulas" | null; sideWidth?: number; bottomHeight?: number; basemap?: Basemap; buildings?: boolean };
+type Layout = { side?: "props" | "errors" | "history" | "routes" | null; bottom?: "calc" | "compare" | "formulas" | null; sideWidth?: number; bottomHeight?: number; basemap?: Basemap; buildings?: boolean };
 function loadLayout(): Layout {
   try { return JSON.parse(localStorage.getItem("layout") ?? "{}"); } catch { return {}; }
 }
@@ -57,7 +58,7 @@ export default function App() {
   // null - панель скрыта, вместо нее узкая полоска с вкладками
   // раскладка окна запоминается между запусками: панели остаются такими, какими их оставили
   const [saved] = useState(loadLayout);
-  const [side, setSide] = useState<"props" | "errors" | "history" | null>(saved.side === undefined ? "props" : saved.side);
+  const [side, setSide] = useState<"props" | "errors" | "history" | "routes" | null>(saved.side === undefined ? "props" : saved.side);
   const [bottom, setBottom] = useState<"calc" | "compare" | "formulas" | null>(saved.bottom === undefined ? "calc" : saved.bottom);
   // размеры панелей в пикселях, меняются перетаскиванием края
   // размеры панелей не меньше рабочего минимума: если окно открылось свернутым (ширина 0),
@@ -305,6 +306,7 @@ export default function App() {
             <div className="tabs">
               <button className={side === "props" ? "on" : ""} onClick={() => setSide("props")}>Свойства</button>
               <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
+              <button className={side === "routes" ? "on" : ""} onClick={() => setSide("routes")}>Маршруты</button>
               <button className={side === "history" ? "on" : ""} onClick={() => setSide("history")}>История</button>
               <span className="grow" />
               <button className="hide" onClick={() => setSide(null)} title="Скрыть панель и отдать место карте"><span className="lbl">Скрыть</span><Icon name="chevronRight" size={14} /></button>
@@ -312,11 +314,13 @@ export default function App() {
             {side === "props" && <PropsPanel />}
             {side === "errors" && <ErrorsPanel />}
             {side === "history" && <HistoryPanel />}
+            {side === "routes" && <RoutesPanel />}
           </aside>
         ) : (
           <aside className="rail" title="Открыть правую панель">
             <button onClick={() => setSide("props")}><Icon name="chevronLeft" size={14} className="arrow" />Свойства</button>
             <button onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
+            <button onClick={() => setSide("routes")}>Маршруты</button>
             <button onClick={() => setSide("history")}>История</button>
           </aside>
         )}

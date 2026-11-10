@@ -65,6 +65,8 @@ export function writeOsm(data: OsmData): string {
     const attrs = r.id < 0 ? fresh : r.attrs;
     let s = `  <relation id="${rid(r.id)}"${attrsToString(attrs)}>\n`;
     for (const m of r.members) {
+      // новая дорога, которой уже нет (правку отменили): в файл такую ссылку не пишем
+      if (m.ref < 0 && !(m.type === "node" ? data.nodes.has(m.ref) : m.type === "way" ? data.ways.has(m.ref) : data.relations.has(m.ref))) continue;
       const ref = m.type === "node" ? nid(m.ref) : m.type === "way" ? wid(m.ref) : rid(m.ref);
       s += `    <member type="${m.type}" ref="${ref}" role="${esc(m.role)}"/>\n`;
     }

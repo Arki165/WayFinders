@@ -8,6 +8,7 @@ import { distM, makeProjection, project } from "./geo";
 import { buildingAt, buildingIndex, buildingsOnSegment, mayCrossBuildings, wayThroughBuilding } from "./buildings";
 import { isDrivable, lanesOf, roadClass, type Arm } from "./roads";
 import { roadWidth } from "./lanes";
+import { copyRouteMembership } from "./routes";
 import type { CustomTemplate } from "./templates";
 
 // ways - несколько дорог (Shift+клик) или участок между двумя узлами (section)
@@ -409,6 +410,8 @@ export function splitWay(wayId: number, nodeId: number) {
     const id = newId();
     d.ways.set(id, { id, nodeIds: w.nodeIds.slice(i), tags: { ...w.tags }, attrs: {} });
     w.nodeIds = w.nodeIds.slice(0, i + 1);
+    // вторая половина остается в тех же маршрутах автобусов и трамваев
+    copyRouteMembership(d, wayId, id);
   });
   ed().toast("Дорога разрезана на две");
 }

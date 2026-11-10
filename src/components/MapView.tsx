@@ -16,6 +16,7 @@ import { cityPois, isMetroWay, metroLineCount, metroLines, walkRadius, zebras, t
 
 const POI_TEXT: Record<PoiKind, string> = { crossing: "Пешеходный переход", bus: "Автобусная остановка", tram: "Трамвайная остановка", train: "Ж/д станция или платформа", metro: "Станция метро", entrance: "Вход в метро" };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
+import { getRoute, useRoute } from "../model/routes";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmData, OsmWay } from "../osm/types";
@@ -786,6 +787,16 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     return { items, lines, labels, color };
   }, [data, layersData, version, laneBox, nodeWays]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---------- выбранный маршрут транспорта: линия по его дорогам и остановки по порядку ----------
+  const routeId = useRoute((s) => s.id);
+  const routeData = useMemo(() => {
+    const r = data && routeId !== null ? getRoute(data, routeId) : null;
+    if (!r || !data) return null;
+    const paths = r.ways.map((id) => data.ways.get(id)!.nodeIds.map((n) => data.nodes.get(n)).filter(Boolean).map((n) => [n!.lon, n!.lat] as [number, number]));
+    const stops = r.stops.map((id, i) => { const n = data.nodes.get(id)!; return { pos: [n.lon, n.lat] as [number, number], num: String(i + 1) }; });
+    return { color: r.color, paths, stops };
+  }, [data, version, routeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------- правки относительно исходного файла ----------
   const changes = useMemo(() => {
     if (!data || !original || !showChanges) return [];
@@ -921,7 +932,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (m) mids.push({ index: i, pos: [(m.lon + n.lon) / 2, (m.lat + n.lat) / 2] });
       });
     }
+    // маршрут поверх дорог: темная или светлая обводка, цветная линия, остановки с номерами
+    const routeLayers = routeData ? [
+      new PathLayer({ id: "route-casing", data: routeData.paths, getPath: (d) => d, getColor: dark ? [20, 21, 25, 230] : [255, 255, 255, 240], getWidth: 10, widthUnits: "pixels", capRounded: true, jointRounded: true, parameters: flat }),
+      new PathLayer({ id: "route", data: routeData.paths, getPath: (d) => d, getColor: [...routeData.color, 235] as Rgba, getWidth: 6, widthUnits: "pixels", capRounded: true, jointRounded: true, parameters: flat }),
+      new ScatterplotLayer({ id: "route-stops", data: routeData.stops, getPosition: (d) => d.pos, getRadius: 9, radiusUnits: "pixels", getFillColor: dark ? [30, 31, 36, 255] : [255, 255, 255, 255], stroked: true, getLineColor: [...routeData.color, 255] as Rgba, getLineWidth: 2.5, lineWidthUnits: "pixels", parameters: flat }),
+      new TextLayer({ id: "route-nums", data: routeData.stops, getPosition: (d) => d.pos, getText: (d) => d.num, getSize: 11, getColor: dark ? [235, 236, 240, 255] : [30, 32, 36, 255], fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", parameters: flat }),
+    ] : [];
     const handleLayers = [
+      ...routeLayers,
         new ScatterplotLayer({ id: "bld-mids", data: mids, getPosition: (d) => d.pos, getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 150], stroked: true, getLineColor: [255, 255, 255, 200], getLineWidth: 1, lineWidthUnits: "pixels", pickable: true, parameters: flat }),
         new ScatterplotLayer({ id: "bld-corners", data: corners, getPosition: (d) => d.pos, getRadius: 6, radiusUnits: "pixels", getFillColor: [255, 255, 255, 255], stroked: true, getLineColor: [31, 111, 209, 255], getLineWidth: 2.5, lineWidthUnits: "pixels", pickable: true, parameters: flat }),
     ];
@@ -949,7 +968,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой
       layers: view3d ? [...groundLayers, buildingsLayer, ...pointLayers, ...handleLayers] : [buildingsLayer, ...groundLayers, ...pointLayers, ...handleLayers],
     });
-  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark]);
+  }, [layersData, laneData, laneSel, lanesOn, heat, level, show, iconAtlas, selection, zoom, tool, check, draw, cursor, view3d, version, data, changes, dark, hlSet, lists, snapMark, routeData]);
 
   const hint: Record<string, string> = {
     select: "Клик выделяет дорогу или узел, узел можно перетащить. Shift+клик: несколько дорог или участок от выбранного узла до другого.",
