@@ -895,4 +895,6 @@ export const EN: Record<string, string> = {
   "для пешеходов": "for pedestrians",
   "Пути, тротуары, здания": "Tracks, sidewalks, buildings",
   "Шаблон новой дороги: тип, полосы и скорость": "New road template: type, lanes and speed",
+  "Связи полос": "Lane links",
+  "Меняются стрелками поворота в свойствах полосы": "Change them with the turn arrows in the lane properties",
 };

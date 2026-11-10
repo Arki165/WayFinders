@@ -9,6 +9,7 @@ import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, move
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { distM, tangentArc, turnAngle } from "../model/geo";
+import { laneLinks, type LaneLink, type LinkKind } from "../model/links";
 import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
@@ -231,6 +232,8 @@ type RoadItem = { id: number; path: P3[]; color: [number, number, number, number
 type Pt = { id: number; pos: [number, number] };
 // Полоса картограммы загрузки: цвет по Z, ширина по интенсивности N, плашка со значением Z в середине
 type BandItem = { id: number; path: P3[]; color: [number, number, number]; n: number; z: number; mid: P3; long: boolean };
+// Цвета связей полос на перекрестке
+const LINK_COLORS: Record<LinkKind, [number, number, number, number]> = { left: [240, 150, 40, 240], through: [40, 190, 200, 240], right: [80, 190, 100, 240] };
 const BAND_MIN = 4, BAND_MAX = 20; // ширина полосы картограммы на экране, пикселей
 type LaneItem = { wayId: number; index: number; path: P3[]; kind: string; width: number };
 
@@ -948,6 +951,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const vertIds = selWay ? selWay.nodeIds : section ? [section.from, section.to] : [];
     const vertices: Pt[] = vertIds.filter((id) => data.nodes.has(id)).map((id) => { const n = data.nodes.get(id)!; return { id, pos: [n.lon, n.lat] as [number, number] }; });
     const nodes = showNodes && zoom >= 15.5 ? [...layersData.junctions, ...vertices] : vertices;
+    // связи полос на выбранном перекрестке: с какой полосы куда можно проехать
+    const links = selNode !== null && level !== "metro" && zoom >= 16 ? laneLinks(data, selNode) : [];
     const drawPath = draw.map((p) => [p.lon, p.lat] as [number, number]);
     // подпись у курсора при рисовании: длина нового отрезка и угол поворота, у дуги еще радиус
     const drawLabel: { pos: [number, number]; text: string }[] = [];
@@ -1082,6 +1087,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new IconLayer<Poi>({ id: "pois", data: iconAtlas ? poiData : [], getPosition: (d) => d.pos, iconAtlas: iconAtlas!, iconMapping: ICON_MAPPING_2X, getIcon: (d) => d.kind, getSize: (d) => (d.kind === "entrance" ? 16 : d.kind === "metro" ? 26 : zoom >= 16.5 ? 26 : 20), sizeUnits: "pixels", pickable: true, updateTriggers: { getSize: zoom >= 16.5 } }),
         new TextLayer<Poi>({ id: "metro-names", data: stationNames, getPosition: (d) => d.pos, getText: (d) => d.name, getSize: 13, getPixelOffset: [0, 20], getColor: dark ? [235, 238, 242, 255] : [30, 30, 30, 255], outlineWidth: 3, outlineColor: dark ? [22, 23, 27, 255] : [255, 255, 255, 255], fontSettings: { sdf: true }, characterSet: "auto", fontWeight: 700, updateTriggers: { getColor: dark } }),
         // кольцо вокруг выбранного узла: видно и под значком
+new PathLayer<LaneLink>({ id: "lane-links", data: links, getPath: (d) => d.path, getColor: (d) => LINK_COLORS[d.kind], getWidth: 2.5, widthUnits: "pixels", capRounded: true, jointRounded: true }),
+        // точка на конце связи показывает, в какую полосу она приходит
+        new ScatterplotLayer<LaneLink>({ id: "lane-link-ends", data: links, getPosition: (d) => d.path[d.path.length - 1], getRadius: 3.5, radiusUnits: "pixels", getFillColor: (d) => LINK_COLORS[d.kind] }),
         new ScatterplotLayer({ id: "sel-ring", data: selPt, getPosition: (d) => d.pos, getRadius: 15, radiusUnits: "pixels", filled: false, stroked: true, getLineColor: [31, 111, 209, 255], lineWidthMinPixels: 3 }),
         new ScatterplotLayer({ id: "errors", data: errs, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => (d.type === "trap" || d.type === "isolated" ? 16 : 11), radiusUnits: "pixels", filled: true, getFillColor: (d) => (d.sev === "danger" ? [216, 64, 47, 40] : d.sev === "warn" ? [229, 154, 40, 40] : [61, 107, 143, 40]), getLineColor: (d) => (d.sev === "danger" ? [216, 64, 47, 255] : d.sev === "warn" ? [229, 154, 40, 255] : [61, 107, 143, 255]), stroked: true, lineWidthMinPixels: 2, pickable: true }),
         // участок между двумя узлами (Shift+клик по второму узлу)
@@ -1135,6 +1143,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
           ))}
           <span><i style={{ background: "rgb(180,180,180)" }} />{tr("нет замера")}</span>
           <span className="muted">{layersData.bands.length ? tr("Ширина полосы - интенсивность, до {0} авт/ч. Дорог с замером: {1}", layersData.nMax.toLocaleString(locale()), layersData.bands.length) : tr("Замеров пока нет: задайте интенсивность N в свойствах дороги")}</span>
+        </div>
+      )}
+      {/* связи полос выбранного перекрестка: что значат цвета линий */}
+      {data && !heat && !showChanges && zoom >= 16 && selection?.kind === "node" && laneLinks(data, selection.id).length > 0 && (
+        <div className="legend">
+          <b>{tr("Связи полос")}</b>
+          {(["left", "through", "right"] as LinkKind[]).map((k) => <span key={k}><i style={{ background: `rgb(${LINK_COLORS[k].slice(0, 3).join(",")})` }} />{{ left: tr("Налево"), through: tr("Прямо"), right: tr("Направо") }[k]}</span>)}
+          <span className="muted">{tr("Меняются стрелками поворота в свойствах полосы")}</span>
         </div>
       )}
       {data && showChanges && (
