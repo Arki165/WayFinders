@@ -910,3 +910,20 @@ export function mergeMap(extra: OsmData, name: string) {
   ed().recheck();
   return res;
 }
+
+// Несколько правок подряд как одна: одна строка в истории и одна отмена Ctrl+Z
+export function batch(label: string, f: () => void): number {
+  const before = ed().past.length;
+  f();
+  const st = ed();
+  const cmds = st.past.slice(before);
+  if (cmds.length < 2) return cmds.length;
+  const cmd: Command = {
+    label,
+    time: new Date(),
+    undo: () => { for (const c of [...cmds].reverse()) c.undo(); },
+    redo: () => { for (const c of cmds) c.redo(); },
+  };
+  useEditor.setState({ past: [...st.past.slice(0, before), cmd], future: [], log: [{ label, time: cmd.time }, ...st.log.slice(cmds.length)] });
+  return cmds.length;
+}

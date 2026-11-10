@@ -181,28 +181,48 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <span className="logo" title="Версия программы">WayFinders <small className="ver">v{VERSION}</small></span>
-        <button onClick={openFile} title="Открыть .osm (Ctrl+O)">Открыть</button>
-        <button onClick={addMap} disabled={!data || loading} title="Присоединить еще один .osm к открытой карте: соседний район или другой город. Дороги на стыке сшиваются">+ Добавить карту</button>
-        <button onClick={() => setDialog("import")}>Загрузить из OSM</button>
-        <button onClick={() => setDialog("save")} disabled={!data} title="Сохранить (Ctrl+S)">Сохранить .osm</button>
-        <span className="sep" />
-        <button onClick={() => st.getState().undo()} disabled={!past.length} title="Отменить (Ctrl+Z)">↶</button>
-        <button onClick={() => st.getState().redo()} disabled={!data} title="Повторить (Ctrl+Y)">↷</button>
-        <span className="sep" />
-        <input className="search" list="streets" placeholder="Найти улицу" disabled={!data} onKeyDown={(e) => e.key === "Enter" && search((e.target as HTMLInputElement).value)} onChange={(e) => names.includes(e.target.value) && search(e.target.value)} />
+        {/* верхняя панель: логотип с именем файла, группы «файл», «правка», поиск, «вид» */}
+        <div className="brand" title="Версия программы">
+          <svg className="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M5 19 C 5 11, 19 13, 19 5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="0.1 4.2" />
+            <circle cx="5" cy="19" r="2.6" fill="currentColor" />
+            <circle cx="19" cy="5" r="2.6" fill="none" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <span className="brand-text">
+            <b>WayFinders <small>v{VERSION}</small></b>
+            <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
+          </span>
+        </div>
+        <div className="tb-group">
+          <button onClick={openFile} title="Открыть .osm (Ctrl+O)">Открыть</button>
+          <button onClick={addMap} disabled={!data || loading} title="Добавить карту: присоединить еще один .osm к открытой карте (соседний район или другой город). Дороги на стыке сшиваются">+ Карта</button>
+          <button onClick={() => setDialog("import")} title="Загрузить район или город из OpenStreetMap">Из OSM</button>
+          <button className="tb-save" onClick={() => setDialog("save")} disabled={!data} title="Сохранить .osm (Ctrl+S)">Сохранить</button>
+        </div>
+        <div className="tb-group">
+          <button className="tb-icon" onClick={() => st.getState().undo()} disabled={!past.length} title="Отменить (Ctrl+Z)">↶</button>
+          <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!data} title="Повторить (Ctrl+Y)">↷</button>
+        </div>
+        <label className="tb-search">
+          <span aria-hidden="true">⌕</span>
+          <input list="streets" placeholder="Найти улицу" disabled={!data} onKeyDown={(e) => e.key === "Enter" && search((e.target as HTMLInputElement).value)} onChange={(e) => names.includes(e.target.value) && search(e.target.value)} />
+        </label>
         <datalist id="streets">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <span className="grow" />
-        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="Светлая или темная тема">{theme === "dark" ? "☀ Светлая" : "☾ Темная"}</button>
-        <div className="seg"><button className={!view3d ? "on" : ""} onClick={() => setView3d(false)}>2D</button><button className={view3d ? "on" : ""} onClick={() => setView3d(true)}>3D</button></div>
-        <select value={basemap} onChange={(e) => setBasemap(e.target.value as Basemap)}>
-          <option value="map">Подложка: схема</option>
-          <option value="satellite">Подложка: спутник</option>
-        </select>
-        <button className={heat ? "on" : ""} onClick={() => setHeat(!heat)} title="Тепловая карта загрузки (H)">Загрузка Z</button>
-        <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)}>Здания</button>
-        <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title="Показать на карте новые, измененные и удаленные дороги">Правки</button>
-        <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
+        <div className="tb-group">
+          <button className={!view3d ? "on" : ""} onClick={() => setView3d(false)} title="Вид сверху">2D</button>
+          <button className={view3d ? "on" : ""} onClick={() => setView3d(true)} title="Наклонный вид с объемными зданиями (3)">3D</button>
+          <select value={basemap} onChange={(e) => setBasemap(e.target.value as Basemap)} title="Подложка карты">
+            <option value="map">Схема</option>
+            <option value="satellite">Спутник</option>
+          </select>
+        </div>
+        <div className="tb-group">
+          <button className={heat ? "on" : ""} onClick={() => setHeat(!heat)} title="Тепловая карта загрузки (H)">Загрузка Z</button>
+          <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)} title="Показать здания">Здания</button>
+          <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title="Показать на карте новые, измененные и удаленные дороги">Правки</button>
+        </div>
+        <button className="tb-icon tb-theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title={theme === "dark" ? "Светлая тема" : "Темная тема"}>{theme === "dark" ? "☀" : "☾"}</button>
       </header>
 
       <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${side ? sideWidth + "px" : "36px"}` }}>

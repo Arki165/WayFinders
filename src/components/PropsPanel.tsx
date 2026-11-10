@@ -294,7 +294,13 @@ function NodePanel({ node }: { node: OsmNode }) {
 
       <div className="switch">
         <span>Светофор</span>
-        <button className={isSignal ? "on" : ""} disabled={!onRoad && !isSignal} onClick={() => (isSignal ? change(t.crossing === "traffic_signals" ? { crossing: "uncontrolled" } : {}, "Светофор убран", [...(t.highway === "traffic_signals" ? ["highway"] : []), ...Object.keys(t).filter((k) => k.startsWith("wayfinders:") && k !== "wayfinders:category")]) : change({ highway: "traffic_signals" }, "Светофор добавлен"))}>{isSignal ? "Есть" : "Нет"}</button>
+        <button className={isSignal ? "on" : ""} disabled={!onRoad && !isSignal} onClick={() => {
+          // переход в этом узле остается: без светофора нерегулируемый, со светофором регулируемый
+          const cross = t.highway === "crossing" || !!t.crossing;
+          const phases = Object.keys(t).filter((k) => k.startsWith("wayfinders:") && k !== "wayfinders:category");
+          if (isSignal) change(cross ? { highway: "crossing", crossing: "uncontrolled" } : {}, "Светофор убран", [...(!cross && t.highway === "traffic_signals" ? ["highway"] : []), ...phases]);
+          else change({ highway: "traffic_signals", ...(cross ? { crossing: "traffic_signals" } : {}) }, "Светофор добавлен");
+        }}>{isSignal ? "Есть" : "Нет"}</button>
       </div>
       {!onRoad && <p className="hint">Узел не лежит на проезжей дороге: светофор здесь не учитывается (например, железнодорожный сигнал).</p>}
       {isSignal && onRoad && <SignalBox node={node} arms={arms.filter((a) => a.incoming)} change={change} />}
@@ -430,7 +436,9 @@ function CrossingBox({ node, arms, isSignal }: { node: OsmNode; arms: Arm[]; isS
   const fw = crossingOf(node.id);
   const has = t.highway === "crossing" || !!t.crossing || !!fw;
   const signals = t.crossing === "traffic_signals" || isSignal;
-  const junction = new Set(arms.map((a) => a.wayId + ":" + a.nb)).size >= 3 || isSignal;
+  // перекресток: 3 рукава и больше. Светофор сам по себе переход не блокирует: на обычной дороге переход ставится прямо в узел и становится регулируемым
+  const junction = new Set(arms.map((a) => a.wayId + ":" + a.nb)).size >= 3;
+  const toast = useEditor((s) => s.toast);
   // рукава без повторов: по одной кнопке на дорогу и сторону
   const uniq = [...new Map(arms.map((a) => [a.wayId + ":" + a.nb, a])).values()];
   let fromTo = "";
@@ -444,8 +452,8 @@ function CrossingBox({ node, arms, isSignal }: { node: OsmNode; arms: Arm[]; isS
     <div>
       <div className="switch">
         <span>Пешеходный переход</span>
-        <button className={has ? "on" : ""} disabled={!has && junction} title={junction && !has ? "На перекрестке выберите ниже, через какую дорогу переход" : ""}
-          onClick={() => (has ? removeCrossing(node.id) : setCrossing(node.id, null, false))}>{has ? "Есть" : "Нет"}</button>
+        <button className={has ? "on" : ""} title={junction && !has ? "На перекрестке выберите ниже, через какую дорогу переход" : ""}
+          onClick={() => (has ? removeCrossing(node.id) : junction ? toast("На перекрестке выберите ниже, через какую дорогу идет переход") : setCrossing(node.id, null, signals))}>{has ? "Есть" : "Нет"}</button>
       </div>
       {fw && (
         <div className="cross-info">

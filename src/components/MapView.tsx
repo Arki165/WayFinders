@@ -28,8 +28,8 @@ function mapPaint(dark: boolean) {
 const makeStyle = (dark: boolean): maplibregl.StyleSpecification => ({
   version: 8,
   sources: {
-    map: { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri, © OpenStreetMap" },
-    satellite: { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri World Imagery" },
+    map: { type: "raster", tiles: ["esri://World_Street_Map/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri, © OpenStreetMap" },
+    satellite: { type: "raster", tiles: ["esri://World_Imagery/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Esri World Imagery" },
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": bgColor(dark) } },
@@ -39,6 +39,34 @@ const makeStyle = (dark: boolean): maplibregl.StyleSpecification => ({
 });
 
 maplibregl.setWorkerUrl(workerUrl);
+
+// Плитки подложки Esri. Там, где у Esri нет детальной съемки (за городом, у Байкала, в тайге),
+// сервер вместо плитки отдает серую заглушку «Map data not yet available».
+// Узнаем ее по размеру и сумме байтов и вместо нее показываем увеличенный кусок плитки
+// с меньшим приближением: чуть размыто, но без надписи.
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+const isPlaceholder = (b: ArrayBuffer) => {
+  if (b.byteLength !== 2521) return false;
+  let sum = 0;
+  for (const v of new Uint8Array(b)) sum += v;
+  return sum === 224110;
+};
+maplibregl.addProtocol("esri", async (params, abort) => {
+  const [svc, z, y, x] = params.url.replace("esri://", "").split("/");
+  const Z = Number(z), Y = Number(y), X = Number(x);
+  for (let up = 0; up <= 6 && Z - up >= 0; up++) {
+    const res = await fetch(`${ESRI}/${svc}/MapServer/tile/${Z - up}/${Y >> up}/${X >> up}`, { signal: abort.signal });
+    const buf = await res.arrayBuffer();
+    if (isPlaceholder(buf)) continue;
+    if (up === 0) return { data: buf };
+    // вырезаем из плитки-родителя нужный кусок и растягиваем до 256×256
+    const size = 256 >> up, bmp = await createImageBitmap(new Blob([buf]));
+    const cv = new OffscreenCanvas(256, 256);
+    cv.getContext("2d")!.drawImage(bmp, (X % (1 << up)) * size, (Y % (1 << up)) * size, size, size, 0, 0, 256, 256);
+    return { data: await (await cv.convertToBlob({ type: "image/png" })).arrayBuffer() };
+  }
+  throw new Error("Нет плитки подложки");
+});
 
 // Перетаскивание узла: с какого приближения можно и через сколько пикселей начинается
 const DRAG_MIN_ZOOM = 14;
@@ -114,7 +142,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // ---------- создание карты ----------
   useEffect(() => {
     if (!box.current) return;
-    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, maxPitch: 70, doubleClickZoom: false, boxZoom: false }); // Shift+клик нужен для выделения, рамка приближения его перехватывала
+    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, maxPitch: 70, doubleClickZoom: false, boxZoom: false, trackResize: false }); // Shift+клик нужен для выделения, рамка приближения его перехватывала
+    // Когда тянут край панели, карта подгоняет размер сразу и тут же перерисовывается.
+    // Встроенная подгонка ждала следующего кадра: картинка растягивалась и «дрожала как желе».
+    const ro = new ResizeObserver(() => { map.resize(); map.redraw(); });
+    ro.observe(box.current);
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
@@ -217,8 +249,15 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (nodeId === null) return st.toast("Кликните по узлу дороги (включите масштаб поближе)");
         const n = st.data.nodes.get(nodeId)!;
         const tags = { ...n.tags };
-        if (tags.highway === "traffic_signals") { delete tags.highway; setNodeTags(nodeId, tags, "Светофор убран"); }
-        else { tags.highway = "traffic_signals"; setNodeTags(nodeId, tags, "Светофор добавлен"); }
+        // пешеходный переход в этом узле не пропадает: со светофором он становится регулируемым, без него - обычным
+        if (tags.highway === "traffic_signals") {
+          if (tags.crossing) { tags.highway = "crossing"; tags.crossing = "uncontrolled"; } else delete tags.highway;
+          setNodeTags(nodeId, tags, "Светофор убран");
+        } else {
+          if (tags.highway === "crossing" || tags.crossing) tags.crossing = "traffic_signals";
+          tags.highway = "traffic_signals";
+          setNodeTags(nodeId, tags, "Светофор добавлен");
+        }
         st.select({ kind: "node", id: nodeId });
       } else if (t === "split") {
         if (nodeId === null) return st.toast("Кликните по среднему узлу дороги");
@@ -233,7 +272,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       }
     });
     map.on("dblclick", () => { if (live.current.tool === "draw") finishDraw(); });
-    return () => map.remove();
+    return () => { ro.disconnect(); map.remove(); };
   }, []);
 
   function finishDraw() {
