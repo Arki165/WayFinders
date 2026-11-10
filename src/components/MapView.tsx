@@ -13,7 +13,7 @@ import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
 import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
-import { cityPois, isMetroWay, metroLineCount, metroLines, poiKind, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
+import { cityPois, isMetroWay, metroLineCount, metroLines, poiKind, stopLines, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
 const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind(n) : null);
 
 const POI_TEXT: Record<PoiKind, string> = { get crossing() { return tr("Пешеходный переход"); }, get bus() { return tr("Автобусная остановка"); }, get tram() { return tr("Трамвайная остановка"); }, get train() { return tr("Ж/д станция или платформа"); }, get metro() { return tr("Станция метро"); }, get entrance() { return tr("Вход в метро"); } };
@@ -776,9 +776,10 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pois: Poi[] = cityPois(data);
     const metro = metroLines(data);
     const zebra = zebras(data, pois);
+    const stops = stopLines(data, new Set(signals.map((x) => x.id)));
     // самая большая интенсивность на карте: от нее считается ширина полос картограммы
     const nMax = bands.reduce((m, d) => Math.max(m, d.n), 0);
-    return { bands, nMax, br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
+    return { bands, nMax, stops, br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
   }, [data, version, heat, norms, showBuildings, langId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- полосы и разметка в видимой части карты ----------
@@ -1030,6 +1031,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // линия перехода под «зеброй»: когда зебра видна, линия почти прозрачная (по ней все равно можно кликнуть)
         new PathLayer({ id: "crossings", data: crossLines, getPath: (d) => d.path, getColor: (d): Rgba => (d.id === selWay?.id ? [31, 111, 209, 255] : hlSet.has(d.id) ? soften(HL, dark) : d.zebra && zebraData.length ? [d.color[0], d.color[1], d.color[2], 3] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight, zebraData.length > 0] } }),
         new PathLayer({ id: "zebra", data: zebraData, getPath: (d) => d, getColor: dark ? [225, 230, 236, 230] : [255, 255, 255, 245], getWidth: 0.5, widthUnits: "meters", widthMinPixels: 1, updateTriggers: { getColor: dark } }),
+        // стоп-линии у светофоров (вблизи, вместе с разметкой полос)
+        new PathLayer({ id: "stop-lines", data: city && show.signals && show.lanes && laneClose ? layersData.stops : [], getPath: (d) => d, getColor: dark ? [225, 230, 236, 240] : [255, 255, 255, 250], getWidth: 0.45, widthUnits: "meters", widthMinPixels: 1.5, updateTriggers: { getColor: dark } }),
         // картограмма загрузки: чем больше машин в час, тем шире полоса, цвет по Z
         new PathLayer<BandItem>({ id: "heat-bands", data: heat && city ? layersData.bands : [], getPath: (d) => d.path, getColor: (d) => [d.color[0], d.color[1], d.color[2], laneClose ? 150 : 215], getWidth: (d) => BAND_MIN + (BAND_MAX - BAND_MIN) * (layersData.nMax ? d.n / layersData.nMax : 0), widthUnits: "pixels", capRounded: true, jointRounded: true, updateTriggers: { getColor: laneClose, getWidth: layersData.nMax } }),
         // плашки со значением Z: вблизи у всех дорог, подальше только у длинных, чтобы не слипались

@@ -3,7 +3,7 @@
 import { nameOf } from "../i18n";
 import type { OsmData, OsmNode, OsmWay } from "../osm/types";
 import { isDrivable } from "./roads";
-import { roadWidth } from "./lanes";
+import { getLanes, laneWidth, roadWidth } from "./lanes";
 
 export type PoiKind = "crossing" | "bus" | "tram" | "train" | "metro" | "entrance";
 export interface Poi { id: number; pos: [number, number]; kind: PoiKind; name: string }
@@ -122,6 +122,52 @@ export function zebras(data: OsmData, pois: Poi[]): [number, number][][] {
         out.push([
           [n.lon + (cx - dx * 1.5) / k, n.lat + (cy - dy * 1.5) / M_LAT],
           [n.lon + (cx + dx * 1.5) / k, n.lat + (cy + dy * 1.5) / M_LAT],
+        ]);
+      }
+    }
+  }
+  return out;
+}
+
+// Стоп-линии у светофоров: белая линия поперек полос, по которым машины подъезжают к светофору.
+// signalIds - узлы со светофором на проезжей части.
+export function stopLines(data: OsmData, signalIds: Set<number>): [number, number][][] {
+  const out: [number, number][][] = [];
+  if (!signalIds.size) return out;
+  // сначала собираем, какие дороги проходят через каждый светофор
+  const at = new Map<number, { w: OsmWay; i: number }[]>();
+  for (const w of data.ways.values()) {
+    if (!isDrivable(w)) continue;
+    w.nodeIds.forEach((id, i) => { if (signalIds.has(id)) at.set(id, [...(at.get(id) ?? []), { w, i }]); });
+  }
+  for (const [id, list] of at) {
+    const n = data.nodes.get(id);
+    if (!n) continue;
+    const k = Math.cos((n.lat * Math.PI) / 180) * M_LAT;
+    // светофор на перекрестке: линия отступает на полширины самой широкой дороги, иначе стоит перед переходом
+    const junction = list.length > 1;
+    const back = junction ? Math.max(...list.map((x) => roadWidth(x.w))) / 2 + 2 : 2.6;
+    for (const { w, i } of list) {
+      const t = w.tags;
+      const ow = t.oneway === "yes" || t.oneway === "1" || t.junction === "roundabout" ? 1 : t.oneway === "-1" ? -1 : 0;
+      const lanes = getLanes(w), W = lanes.reduce((s, l) => s + laneWidth(l), 0);
+      // к светофору подъезжают с предыдущего узла (полосы «туда») и со следующего (полосы «обратно»)
+      for (const [j, dir, ok] of [[i - 1, "forward", ow !== -1], [i + 1, "backward", ow !== 1]] as const) {
+        const nb = data.nodes.get(w.nodeIds[j]);
+        if (!ok || !nb || nb === n) continue;
+        const win = lanes.filter((l) => l.dir === dir).reduce((s, l) => s + laneWidth(l), 0);
+        if (!win) continue;
+        let dx = (n.lon - nb.lon) * k, dy = (n.lat - nb.lat) * M_LAT;
+        const len = Math.hypot(dx, dy);
+        if (len < 3) continue;
+        dx /= len; dy /= len;
+        const d = Math.min(back, len * 0.8);
+        // точка на оси дороги перед светофором и направление вправо по ходу движения
+        const px = -dx * d, py = -dy * d, rx = dy, ry = -dx;
+        const a = W / 2 - win + 0.15, b = W / 2 - 0.15;
+        out.push([
+          [n.lon + (px + rx * a) / k, n.lat + (py + ry * a) / M_LAT],
+          [n.lon + (px + rx * b) / k, n.lat + (py + ry * b) / M_LAT],
         ]);
       }
     }
