@@ -12,16 +12,17 @@ app.setName("Wayfinder");
 // Windows: свой id приложения, тогда на панели задач окно с нашим значком, а не значком Electron
 if (process.platform === "win32") app.setAppUserModelId("ru.wayfinders.editor");
 
-// Наш значок: при разработке из public, в собранной программе из dist
-function iconPath() {
-  const dev = path.join(__dirname, "..", "public", "icon.png");
-  const built = path.join(__dirname, "..", "dist", "icon.png");
+// Наш значок: при разработке из public, в собранной программе из dist.
+// Для дока macOS свой файл icon-mac.png: с прозрачными полями, как у других значков в доке
+function iconPath(file = "icon.png") {
+  const dev = path.join(__dirname, "..", "public", file);
+  const built = path.join(__dirname, "..", "dist", file);
   return process.env.VITE_DEV || !fs.existsSync(built) ? dev : built;
 }
 
 // значок в доке macOS: в режиме разработки иначе виден значок Electron
 function setDockIcon() {
-  if (process.platform === "darwin" && app.dock) app.dock.setIcon(iconPath());
+  if (process.platform === "darwin" && app.dock) app.dock.setIcon(iconPath("icon-mac.png"));
 }
 
 function createWindow() {
