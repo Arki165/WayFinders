@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import MapView, { getMapBounds, type Basemap } from "./components/MapView";
+import MapView, { getMapBounds, setMapDark, type Basemap } from "./components/MapView";
 import PropsPanel from "./components/PropsPanel";
 import ErrorsPanel from "./components/ErrorsPanel";
 import HistoryPanel from "./components/HistoryPanel";
@@ -44,6 +44,14 @@ export default function App() {
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  // тема запоминается между запусками
+  const [theme, setTheme] = useState(localStorage.getItem("theme") === "dark" ? "dark" : "light");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    setMapDark(theme === "dark");
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!message) return;
@@ -153,6 +161,7 @@ export default function App() {
         <input className="search" list="streets" placeholder="Найти улицу" disabled={!data} onKeyDown={(e) => e.key === "Enter" && search((e.target as HTMLInputElement).value)} onChange={(e) => names.includes(e.target.value) && search(e.target.value)} />
         <datalist id="streets">{names.map((n) => <option key={n} value={n} />)}</datalist>
         <span className="grow" />
+        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="Светлая или темная тема">{theme === "dark" ? "☀ Светлая" : "☾ Темная"}</button>
         <div className="seg"><button className={!view3d ? "on" : ""} onClick={() => setView3d(false)}>2D</button><button className={view3d ? "on" : ""} onClick={() => setView3d(true)}>3D</button></div>
         <select value={basemap} onChange={(e) => setBasemap(e.target.value as Basemap)}>
           <option value="map">Подложка: схема</option>

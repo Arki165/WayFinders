@@ -36,6 +36,21 @@ export function getMapBounds(): [number, number, number, number] | null {
   return [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
 }
 
+// Темная тема: светлую схему переворачиваем по яркости, вода остается синей
+let darkMap = false;
+function applyDark() {
+  const map = currentMap;
+  if (!map || !map.isStyleLoaded()) return;
+  map.setPaintProperty("bg", "background-color", darkMap ? "#1b1e1c" : "#e8e9e4");
+  map.setPaintProperty("map", "raster-brightness-min", darkMap ? 1 : 0);
+  map.setPaintProperty("map", "raster-brightness-max", darkMap ? 0 : 1);
+  map.setPaintProperty("map", "raster-hue-rotate", darkMap ? 180 : 0);
+}
+export function setMapDark(dark: boolean) {
+  darkMap = dark;
+  applyDark();
+}
+
 type RoadItem ={ id: number; path: [number, number, number][]; color: [number, number, number, number]; width: number };
 type Pt = { id: number; pos: [number, number] };
 
@@ -80,6 +95,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, drawTemp
     map.addControl(overlay);
     mapRef.current = map;
     currentMap = map;
+    map.on("load", applyDark);
     overlayRef.current = overlay;
     map.on("zoomend", () => setZoom(map.getZoom()));
 
