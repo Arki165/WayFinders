@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import type { OsmData, OsmRelation } from "../osm/types";
 import { distM } from "./geo";
+import { newId, runRelation, useEditor } from "./store";
 
 export type RouteKind = "bus" | "trolleybus" | "tram" | "share_taxi";
 export const ROUTE_KINDS: RouteKind[] = ["bus", "trolleybus", "tram", "share_taxi"];
@@ -20,6 +21,7 @@ export interface Route {
   ways: number[]; // дороги маршрута, которые есть в файле
   stops: number[]; // остановки по порядку, которые есть в файле
   missing: number; // сколько частей маршрута нет в файле (обрезано краем карты)
+  custom: boolean; // свой маршрут, нарисованный в программе
   lengthM: number;
 }
 
@@ -58,14 +60,16 @@ function toRoute(data: OsmData, r: OsmRelation): Route | null {
     }
   }
   // название: «Автобус 16: Центр => Аэропорт» - берем часть после двоеточия, иначе from - to
-  const name = (t.from && t.to ? `${t.from} - ${t.to}` : (t.name ?? "").replace(/^[^:]*:\s*/, "").replace(/\s*=>\s*/g, " - ")) || "Без названия";
-  return { id: r.id, kind: t.route, ref: t.ref ?? "?", name, color: parseColor(t.colour) ?? ROUTE_COLOR[t.route], ways, stops, missing, lengthM };
+  const custom = t[CUSTOM_KEY] === "yes";
+  const name = (t.from && t.to ? `${t.from} - ${t.to}` : custom ? "" : (t.name ?? "").replace(/^[^:]*:\s*/, "").replace(/\s*=>\s*/g, " - ")) || (custom ? "Остановки еще не выбраны" : "Без названия");
+  return { id: r.id, kind: t.route, ref: t.ref ?? "?", name, color: parseColor(t.colour) ?? ROUTE_COLOR[t.route], ways, stops, missing, lengthM, custom };
 }
 
 // Все маршруты файла: по виду транспорта, затем по номеру (2, 10, 10к, 45)
 export function listRoutes(data: OsmData): Route[] {
   const out: Route[] = [];
-  for (const r of data.relations.values()) { const x = toRoute(data, r); if (x && x.ways.length) out.push(x); }
+  // маршруты, у которых в файле нет ни одной дороги, не показываем; свой новый маршрут показываем и пустым
+  for (const r of data.relations.values()) { const x = toRoute(data, r); if (x && (x.ways.length || x.custom)) out.push(x); }
   const num = (s: string) => parseInt(s, 10) || 9999;
   return out.sort((a, b) => ROUTE_KINDS.indexOf(a.kind) - ROUTE_KINDS.indexOf(b.kind) || num(a.ref) - num(b.ref) || a.ref.localeCompare(b.ref, "ru") || a.name.localeCompare(b.name, "ru"));
 }
@@ -85,8 +89,90 @@ export function copyRouteMembership(data: OsmData, fromWay: number, newWay: numb
   }
 }
 
-// Какой маршрут выбран в списке (показывается на карте)
-export const useRoute = create<{ id: number | null; set: (id: number | null) => void }>((set) => ({ id: null, set: (id) => set({ id }) }));
+// Какой маршрут выбран в списке (показывается на карте) и правим ли мы его сейчас
+export const useRoute = create<{ id: number | null; editing: boolean; set: (id: number | null) => void; edit: (on: boolean) => void }>((set) => ({
+  id: null, editing: false,
+  set: (id) => set({ id, editing: false }),
+  edit: (editing) => set({ editing }),
+}));
+
+// ---------- свои маршруты ----------
+// Отметка своего маршрута в файле (теги wayfinders:* программа уже использует для замеров)
+export const CUSTOM_KEY = "wayfinders:custom";
+
+// Начало и конец своего маршрута - названия первой и последней остановки, название маршрута из них.
+// Так их не нужно вводить руками, и они всегда совпадают с тем, что нарисовано.
+function renameRoute(d: OsmData, r: OsmRelation) {
+  const names = r.members.filter((m) => m.type === "node").map((m) => d.nodes.get(m.ref)?.tags.name).filter(Boolean) as string[];
+  const kind = isRouteKind(r.tags.route) ? r.tags.route : "bus";
+  const t = { ...r.tags };
+  delete t.from; delete t.to;
+  if (names.length >= 2) { t.from = names[0]; t.to = names[names.length - 1]; }
+  t.name = `${ROUTE_RU[kind]} ${t.ref ?? ""}` + (t.from ? `: ${t.from} => ${t.to}` : "");
+  r.tags = t;
+}
+
+export function createRoute(kind: RouteKind, ref: string): number {
+  const id = newId();
+  runRelation("Новый маршрут " + ref, id, (d) => {
+    const r: OsmRelation = { id, members: [], attrs: {}, tags: { type: "route", route: kind, ref, "public_transport:version": "2", [CUSTOM_KEY]: "yes" } };
+    renameRoute(d, r);
+    d.relations.set(id, r);
+  });
+  useRoute.getState().set(id);
+  useRoute.getState().edit(true);
+  return id;
+}
+
+// Вид транспорта и номер
+export function setRouteInfo(id: number, kind: RouteKind, ref: string) {
+  runRelation("Маршрут " + ref, id, (d) => {
+    const r = d.relations.get(id);
+    if (!r) return;
+    r.tags = { ...r.tags, route: kind, ref };
+    if (r.tags[CUSTOM_KEY] === "yes") renameRoute(d, r);
+  });
+}
+
+// Клик по дороге в режиме правки: дорога добавляется в конец маршрута, повторный клик убирает ее
+export function toggleRouteWay(id: number, wayId: number) {
+  const d = useEditor.getState().data;
+  const r = d?.relations.get(id);
+  if (!r) return;
+  const has = r.members.some((m) => m.type === "way" && m.ref === wayId);
+  runRelation(has ? "Дорога убрана из маршрута" : "Дорога добавлена в маршрут", id, (dd) => {
+    const x = dd.relations.get(id)!;
+    if (has) x.members = x.members.filter((m) => !(m.type === "way" && m.ref === wayId));
+    else x.members.push({ type: "way", ref: wayId, role: "" });
+  });
+}
+
+// Клик по остановке: добавить в конец списка остановок или убрать
+export function toggleRouteStop(id: number, nodeId: number) {
+  const d = useEditor.getState().data;
+  const r = d?.relations.get(id);
+  if (!r) return;
+  const has = r.members.some((m) => m.type === "node" && m.ref === nodeId);
+  // если в маршруте остановки записаны платформами, новую тоже записываем платформой (иначе ее не будет видно)
+  const role = r.members.some((m) => m.type === "node" && m.role.startsWith("platform")) ? "platform" : "stop";
+  runRelation(has ? "Остановка убрана из маршрута" : "Остановка добавлена в маршрут", id, (dd) => {
+    const x = dd.relations.get(id)!;
+    if (has) x.members = x.members.filter((m) => !(m.type === "node" && m.ref === nodeId));
+    else {
+      // остановки идут в начале списка, перед дорогами (так принято в OSM)
+      const firstWay = x.members.findIndex((m) => m.type === "way");
+      const lastStop = x.members.reduce((k, m, i) => (m.type === "node" ? i : k), -1);
+      x.members.splice(lastStop >= 0 ? lastStop + 1 : firstWay >= 0 ? firstWay : x.members.length, 0, { type: "node", ref: nodeId, role });
+    }
+    // у своего маршрута начало и конец - первая и последняя остановка
+    if (x.tags[CUSTOM_KEY] === "yes") renameRoute(dd, x);
+  });
+}
+
+export function deleteRoute(id: number) {
+  runRelation("Маршрут удален", id, (d) => { d.relations.delete(id); });
+  useRoute.getState().set(null);
+}
 
 // Один маршрут по id отношения (или null, если его уже нет)
 export function getRoute(data: OsmData, id: number): Route | null {

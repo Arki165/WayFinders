@@ -1,6 +1,6 @@
 // Состояние редактора и все операции правки с отменой (Ctrl+Z)
 import { create } from "zustand";
-import type { OsmData, OsmNode, OsmWay, Tags } from "../osm/types";
+import type { OsmData, OsmNode, OsmRelation, OsmWay, Tags } from "../osm/types";
 import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { loadNorms, saveNorms, type Norms } from "./calc";
@@ -211,6 +211,23 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
   if (onRoad) { ed().bump(); return ed().toast(BUILDING_ON_ROAD); }
   const corner = buildingsOf(d, [nodeId]).length > 0;
   ed().run(corner ? "Угол здания" : "Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
+}
+
+// ---------- маршруты (отношения OSM) ----------
+// Правка одного отношения с отменой: снимок отношения до и после, как у дорог в run
+const snapRel = (d: OsmData, id: number): OsmRelation | null => { const r = d.relations.get(id); return r ? { ...r, members: r.members.map((m) => ({ ...m })), tags: { ...r.tags } } : null; };
+function putRel(d: OsmData, id: number, r: OsmRelation | null) {
+  if (r) d.relations.set(id, { ...r, members: r.members.map((m) => ({ ...m })), tags: { ...r.tags } }); else d.relations.delete(id);
+}
+export function runRelation(label: string, relId: number, mutate: (d: OsmData) => void) {
+  const st = ed(), d = st.data;
+  if (!d) return;
+  const before = snapRel(d, relId);
+  mutate(d);
+  const after = snapRel(d, relId);
+  const cmd = { label, time: new Date(), undo: () => putRel(d, relId, before), redo: () => putRel(d, relId, after) };
+  useEditor.setState({ past: [...st.past, cmd], future: [], log: [{ label, time: cmd.time }, ...st.log] });
+  ed().recheck();
 }
 
 // ---------- редактор зданий ----------

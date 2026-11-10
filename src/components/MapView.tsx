@@ -12,11 +12,12 @@ import { TEMPLATES } from "../model/templates";
 import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, trimPath, useLane } from "../model/lanes";
 import { buildingIndex, tallestUnder } from "../model/buildings";
 import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
-import { cityPois, isMetroWay, metroLineCount, metroLines, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
+import { cityPois, isMetroWay, metroLineCount, metroLines, poiKind, walkRadius, zebras, type Poi, type PoiKind } from "../model/poi";
+const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind(n) : null);
 
 const POI_TEXT: Record<PoiKind, string> = { crossing: "Пешеходный переход", bus: "Автобусная остановка", tram: "Трамвайная остановка", train: "Ж/д станция или платформа", metro: "Станция метро", entrance: "Вход в метро" };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
-import { getRoute, useRoute } from "../model/routes";
+import { getRoute, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
 import type { OsmData, OsmWay } from "../osm/types";
@@ -276,7 +277,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [draw, setDraw] = useState<DrawPoint[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   // что тащим мышью: узел (id) или здание целиком (bld - его узлы и где они были, origin - точка, где нажали)
-  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] } } | null>(null);
+  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] }; corner?: { wayId: number; index: number } } | null>(null);
 
   const data = useEditor((s) => s.data);
   const original = useEditor((s) => s.original);
@@ -404,12 +405,30 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (lid === "bld-mids" && o?.index !== undefined) {
           // середина стены: появляется новый угол, его сразу можно тащить
           e.preventDefault();
-          const id = insertBuildingCorner(bw.id, o.index, o.pos[1], o.pos[0]);
-          if (id === null) return;
           map.dragPan.disable();
-          dragRef.current = { id, from: [o.pos[1], o.pos[0]], moved: false, start: [e.point.x, e.point.y] };
-          st0.select({ kind: "way", id: bw.id });
+          // угол появится, только когда мышь потянет (просто клик ничего не меняет)
+          dragRef.current = { id: -1, from: [o.pos[1], o.pos[0]], moved: false, start: [e.point.x, e.point.y], corner: { wayId: bw.id, index: o.index } };
           return;
+        }
+        // клик по любому месту стены (не только середине): там появляется новый угол, его можно тянуть дальше
+        if (lid !== "bld-corners" && lid !== "bld-mids" && !e.originalEvent.shiftKey) {
+          let best = { i: -1, px: 7, lat: 0, lon: 0 }; // ближе 7 пикселей к стене
+          for (let i = 1; i < bw.nodeIds.length; i++) {
+            const a = st0.data!.nodes.get(bw.nodeIds[i - 1]), b = st0.data!.nodes.get(bw.nodeIds[i]);
+            if (!a || !b) continue;
+            const pa = map.project([a.lon, a.lat]), pb = map.project([b.lon, b.lat]);
+            const vx = pb.x - pa.x, vy = pb.y - pa.y, L2 = vx * vx + vy * vy || 1;
+            const t = Math.max(0, Math.min(1, ((e.point.x - pa.x) * vx + (e.point.y - pa.y) * vy) / L2));
+            const px = Math.hypot(pa.x + vx * t - e.point.x, pa.y + vy * t - e.point.y);
+            // у самого угла новый угол не нужен: там тянется сам угол
+            if (px < best.px && t > 0.05 && t < 0.95) best = { i, px, lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t };
+          }
+          if (best.i > 0) {
+            e.preventDefault();
+            map.dragPan.disable();
+            dragRef.current = { id: -1, from: [best.lat, best.lon], moved: false, start: [e.point.x, e.point.y], corner: { wayId: bw.id, index: best.i } };
+            return;
+          }
         }
         if (lid === "buildings" && (hit?.object as { id: number }).id === bw.id && !e.originalEvent.shiftKey) {
           // само здание: тащим все его узлы
@@ -441,6 +460,13 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       if (dr && st.data) {
         // узел начинает двигаться, только когда мышь ушла дальше нескольких пикселей: обычный клик его не сдвигает
         if (!dr.moved && Math.hypot(e.point.x - dr.start[0], e.point.y - dr.start[1]) < DRAG_START_PX) return;
+        if (dr.corner) {
+          // мышь потянула от стены: вставляем новый угол и дальше тащим его как обычный узел
+          const id = insertBuildingCorner(dr.corner.wayId, dr.corner.index, dr.from[0], dr.from[1]);
+          dr.corner = undefined;
+          if (id === null) { dragRef.current = null; map.dragPan.enable(); return; }
+          dr.id = id;
+        }
         if (dr.bld) {
           // здание сдвигается на столько, на сколько ушла мышь от точки нажатия
           const dLon = e.lngLat.lng - dr.bld.origin[0], dLat = e.lngLat.lat - dr.bld.origin[1];
@@ -489,6 +515,19 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // клик по полосе - это клик по ее дороге, а в выборе еще и выбор самой полосы
       const wayId = layer === "roads" || layer === "others" || layer === "crossings" || layer === "transit" || layer === "buildings" ? obj!.id : layer === "lanes" ? obj!.wayId : null;
       const shift = (e.originalEvent as MouseEvent).shiftKey;
+      // правка маршрута: клик по дороге добавляет ее в маршрут или убирает, клик по остановке - то же с остановкой
+      const rt = useRoute.getState();
+      if (t === "select" && rt.editing && rt.id !== null && st.data.relations.has(rt.id)) {
+        if (nodeId !== null) {
+          const k = poiKindOf(st.data.nodes.get(nodeId));
+          if (k === "bus" || k === "tram") return toggleRouteStop(rt.id, nodeId);
+          return st.toast("Это не остановка. Кликните значок остановки или дорогу");
+        }
+        const w = wayId !== null ? st.data.ways.get(wayId) : undefined;
+        if (w && (isDrivable(w) || w.tags.railway === "tram")) return toggleRouteWay(rt.id, w.id);
+        if (w) return st.toast("Маршрут идет только по проезжим дорогам и трамвайным путям");
+        return;
+      }
       if (t === "select" && shift) {
         // Shift+клик: дорога добавляется к выделению, второй узел выделяет участок между узлами
         const s = st.selection;
