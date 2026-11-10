@@ -222,6 +222,9 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
     for (const end of [w.nodeIds[0], w.nodeIds[w.nodeIds.length - 1]]) {
       const p = xy(end);
       if (deg.get(end) !== 1 || !inside(p)) continue;
+      // тупик у закрытых ворот или шлагбаума - так задумано, проезда там нет
+      const et = data.nodes.get(end)!.tags;
+      if (et.barrier && (et.access === "no" || et.access === "private" || et.motor_vehicle === "no")) continue;
       let best: { d: number; s: [number, number, number, string] } | null = null;
       for (const i of grid.get(cellKey(Math.floor(p[0] / CELL), Math.floor(p[1] / CELL))) ?? []) {
         const s = segs[i];

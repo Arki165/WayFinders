@@ -410,14 +410,22 @@ function tornFix(d: OsmData, e: GraphError): boolean {
   const xy = (id: number): [number, number] => { const n = d.nodes.get(id)!; return pr.toXY(n.lat, n.lon); };
   const pa = xy(other.nodeIds[idx - 1]), pb = xy(other.nodeIds[idx]);
   const { q } = project(xy(e.node), pa, pb);
-  if (Math.hypot(q[0] - pa[0], q[1] - pa[1]) < 0.5) mergeInto(d, other.nodeIds[idx - 1], e.node);
-  else if (Math.hypot(q[0] - pb[0], q[1] - pb[1]) < 0.5) mergeInto(d, other.nodeIds[idx], e.node);
+  // Конец дороги не двигаем и не сливаем: он бывает общим с лестницей, забором или входом в здание
+  // и несет свои теги. Дорогу продлеваем до точки на соседней дороге (существующей, если она ближе 0,5 м).
+  let to: number;
+  if (Math.hypot(q[0] - pa[0], q[1] - pa[1]) < 0.5) to = other.nodeIds[idx - 1];
+  else if (Math.hypot(q[0] - pb[0], q[1] - pb[1]) < 0.5) to = other.nodeIds[idx];
   else {
     const [lat, lon] = pr.toLatLon(q[0], q[1]);
-    const n = d.nodes.get(e.node)!;
-    n.lat = lat; n.lon = lon;
-    other.nodeIds.splice(idx, 0, e.node);
+    to = newId();
+    d.nodes.set(to, { id: to, lat, lon, tags: {}, attrs: {} });
+    other.nodeIds.splice(idx, 0, to);
   }
+  const road = d.ways.get(e.ways[0]);
+  if (!road) return false;
+  if (road.nodeIds[road.nodeIds.length - 1] === e.node) road.nodeIds.push(to);
+  else if (road.nodeIds[0] === e.node) road.nodeIds.unshift(to);
+  else return false;
   return true;
 }
 
