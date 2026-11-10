@@ -5,6 +5,7 @@ import ErrorsPanel from "./components/ErrorsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import CalcPanel from "./components/CalcPanel";
 import ComparePanel from "./components/ComparePanel";
+import Resizer from "./components/Resizer";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
 import { useEditor, deleteNode, deleteWay, reverseWay, type Tool } from "./model/store";
 import { parseOsm } from "./osm/parse";
@@ -32,6 +33,9 @@ export default function App() {
 
   const [side, setSide] = useState<"props" | "errors" | "history">("props");
   const [bottom, setBottom] = useState<"calc" | "compare" | null>("calc");
+  // размеры панелей в пикселях, меняются перетаскиванием края
+  const [sideWidth, setSideWidth] = useState(360);
+  const [bottomHeight, setBottomHeight] = useState(320);
   const [basemap, setBasemap] = useState<Basemap>("map");
   const [view3d, setView3d] = useState(false);
   const [heat, setHeat] = useState(false);
@@ -159,7 +163,7 @@ export default function App() {
         <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
       </header>
 
-      <div className="work">
+      <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${sideWidth}px` }}>
         <nav className="tools">
           {TOOLS.map((t) => (
             <button key={t.id} className={"tool" + (tool === t.id ? " on" : "")} onClick={() => setTool(t.id)} title={`${t.label} (${t.key})`} disabled={!data}>
@@ -188,7 +192,8 @@ export default function App() {
             </div>
           )}
           {bottom && data && (
-            <section className="bottom">
+            <section className="bottom" style={{ height: bottomHeight }}>
+              <Resizer dir="y" value={bottomHeight} min={150} max={window.innerHeight - 250} onChange={setBottomHeight} />
               <div className="tabs">
                 <button className={bottom === "calc" ? "on" : ""} onClick={() => setBottom("calc")}>Расчеты и графики</button>
                 <button className={bottom === "compare" ? "on" : ""} onClick={() => setBottom("compare")}>Сравнение с исходным</button>
@@ -202,6 +207,7 @@ export default function App() {
         </main>
 
         <aside className="side">
+          <Resizer dir="x" value={sideWidth} min={280} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
           <div className="tabs">
             <button className={side === "props" ? "on" : ""} onClick={() => setSide("props")}>Свойства</button>
             <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
