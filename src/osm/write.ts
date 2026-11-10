@@ -24,7 +24,10 @@ function tagsToXml(tags: Tags): string {
 // больше максимального в файле.
 function makeIdMap(ids: Iterable<number>): Map<number, number> {
   const list = [...ids];
-  let next = Math.max(0, ...list.filter((id) => id > 0)) + 1;
+  // максимум циклом: Math.max(...list) на крупном городе (сотни тысяч узлов) переполняет стек
+  let max = 0;
+  for (const id of list) if (id > max) max = id;
+  let next = max + 1;
   const map = new Map<number, number>();
   for (const id of list.filter((x) => x < 0).sort((a, b) => b - a)) map.set(id, next++);
   return map;

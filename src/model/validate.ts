@@ -1,8 +1,101 @@
 // Поиск ошибок графа: разрывы, пересечения без узла, изолированные куски,
 // ловушки по направлениям, пустые атрибуты, мосты без layer
-import type { OsmData } from "../osm/types";
+import type { OsmData, OsmRelation } from "../osm/types";
 import { isDrivable } from "./roads";
 import { makeProjection, project } from "./geo";
+
+// ---------- граница города ----------
+// Город из OSM скачивается по своей границе (Dialogs.tsx кладет ее в файл как отношение boundary=administrative).
+// Дороги, уходящие за границу, обрезаны: их продолжение не скачано. Это не ошибка карты,
+// поэтому все, что за границей или ближе EDGE_M к ней, считаем краем данных, как край прямоугольника.
+const EDGE_M = 25;
+const CLIP_BAND = 100, CLIP_CELL = 100; // полосы для подсчета пересечений и клетки для расстояния до границы, м
+
+interface Clip {
+  toXY: (lat: number, lon: number) => [number, number];
+  segs: [number, number, number, number][]; // отрезки границы в метрах
+  bands: Map<number, number[]>; // полоса по y -> отрезки, которые ее пересекают
+  cells: Map<string, number[]>; // клетка -> отрезки ближе EDGE_M к ней
+  box: [number, number, number, number]; // рамка границы с запасом
+}
+
+// Граница строится один раз на отношение: проверка графа запускается после каждой правки
+const clipCache = new WeakMap<OsmRelation, Clip | null>();
+
+function buildClip(data: OsmData, r: OsmRelation): Clip | null {
+  const outer = r.members.filter((m) => m.type === "way" && (m.role === "outer" || m.role === ""));
+  if (!outer.length) return null;
+  const lines: [number, number][][] = [];
+  for (const m of outer) {
+    const w = data.ways.get(m.ref);
+    // граница неполная (например, обрезана файлом) - по ней судить нельзя
+    if (!w || w.nodeIds.length < 2) return null;
+    lines.push(w.nodeIds.map((id) => { const n = data.nodes.get(id)!; return [n.lat, n.lon]; }));
+  }
+  let lat0 = 0, lon0 = 0, k = 0;
+  for (const l of lines) for (const [la, lo] of l) { lat0 += la; lon0 += lo; k++; }
+  const pr = makeProjection(lat0 / k, lon0 / k);
+  const segs: Clip["segs"] = [];
+  for (const l of lines) for (let i = 1; i < l.length; i++) {
+    const a = pr.toXY(l[i - 1][0], l[i - 1][1]), b = pr.toXY(l[i][0], l[i][1]);
+    segs.push([a[0], a[1], b[0], b[1]]);
+  }
+  const bands = new Map<number, number[]>(), cells = new Map<string, number[]>();
+  const put = <K,>(m: Map<K, number[]>, key: K, i: number) => { const c = m.get(key); if (c) c.push(i); else m.set(key, [i]); };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  segs.forEach(([ax, ay, bx, by], i) => {
+    x0 = Math.min(x0, ax, bx); x1 = Math.max(x1, ax, bx); y0 = Math.min(y0, ay, by); y1 = Math.max(y1, ay, by);
+    for (let b = Math.floor(Math.min(ay, by) / CLIP_BAND); b <= Math.floor(Math.max(ay, by) / CLIP_BAND); b++) put(bands, b, i);
+    // клетки вдоль отрезка с запасом EDGE_M (по точкам через 20 м, чтобы длинный отрезок не занял миллион клеток)
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 20));
+    const seen = new Set<string>();
+    for (let j = 0; j <= steps; j++) {
+      const x = ax + ((bx - ax) * j) / steps, y = ay + ((by - ay) * j) / steps;
+      for (const dx of [-EDGE_M - 10, EDGE_M + 10]) for (const dy of [-EDGE_M - 10, EDGE_M + 10]) {
+        const key = Math.floor((x + dx) / CLIP_CELL) + ":" + Math.floor((y + dy) / CLIP_CELL);
+        if (!seen.has(key)) { seen.add(key); put(cells, key, i); }
+      }
+    }
+  });
+  return { toXY: pr.toXY, segs, bands, cells, box: [x0 - EDGE_M, y0 - EDGE_M, x1 + EDGE_M, y1 + EDGE_M] };
+}
+
+// Точка внутри границы и дальше EDGE_M от нее
+function insideClip(c: Clip, lat: number, lon: number): boolean {
+  const [px, py] = c.toXY(lat, lon);
+  if (px < c.box[0] || px > c.box[2] || py < c.box[1] || py > c.box[3]) return false;
+  for (const i of c.cells.get(Math.floor(px / CLIP_CELL) + ":" + Math.floor(py / CLIP_CELL)) ?? []) {
+    const s = c.segs[i];
+    if (project([px, py], [s[0], s[1]], [s[2], s[3]]).d < EDGE_M) return false;
+  }
+  // луч вправо: нечетное число пересечений с границей - точка внутри
+  let inside = false;
+  for (const i of c.bands.get(Math.floor(py / CLIP_BAND)) ?? []) {
+    const [ax, ay, bx, by] = c.segs[i];
+    if (ay > py !== by > py && px < ax + ((py - ay) * (bx - ax)) / (by - ay)) inside = !inside;
+  }
+  return inside;
+}
+
+// Наименьший id в списке. Циклом, а не Math.min(...ids): после «соединения карт»
+// отдельный кусок может быть в сотни тысяч узлов, и Math.min с таким списком переполняет стек.
+function minId(ids: number[]): number {
+  let m = Infinity;
+  for (const id of ids) if (id < m) m = id;
+  return m;
+}
+
+// Все целые границы городов в файле (после «соединения карт» их может быть несколько)
+function cityClips(data: OsmData): Clip[] {
+  const out: Clip[] = [];
+  for (const r of data.relations.values()) {
+    if (r.tags.boundary !== "administrative" || (r.tags.type !== "boundary" && r.tags.type !== "multipolygon")) continue;
+    if (!clipCache.has(r)) clipCache.set(r, buildClip(data, r));
+    const c = clipCache.get(r);
+    if (c) out.push(c);
+  }
+  return out;
+}
 
 export type Severity = "danger" | "warn" | "info";
 export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge";
@@ -38,7 +131,15 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   const pr = makeProjection(lat0, lon0);
   const [bx0, by1] = b ? pr.toXY(b.minlat, b.minlon) : [0, 0];
   const [bx1, by0] = b ? pr.toXY(b.maxlat, b.maxlon) : [0, 0];
-  const inside = (p: [number, number]) => !b || (p[0] > bx0 + 25 && p[0] < bx1 - 25 && p[1] > by0 + 25 && p[1] < by1 - 25);
+  const inBox = (p: [number, number]) => !b || (p[0] > bx0 + 25 && p[0] < bx1 - 25 && p[1] > by0 + 25 && p[1] < by1 - 25);
+  // край данных: край прямоугольника или, если город скачан по границе, сама граница города
+  const clips = cityClips(data);
+  const inside = (p: [number, number]) => {
+    if (!inBox(p)) return false;
+    if (!clips.length) return true;
+    const [lat, lon] = toLL(p);
+    return clips.some((c) => insideClip(c, lat, lon));
+  };
 
   const P = new Map<number, [number, number]>();
   const xy = (id: number) => {
@@ -83,7 +184,7 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
   for (const comp of compList.slice(1)) {
     const edge = !comp.every((id) => inside(xy(id)));
     const [lat, lon] = center(comp);
-    errors.push({ key: "iso:" + Math.min(...comp), type: "isolated", sev: edge ? "info" : "danger", lat, lon, ways: waysOf(comp), count: comp.length, edge });
+    errors.push({ key: "iso:" + minId(comp), type: "isolated", sev: edge ? "info" : "danger", lat, lon, ways: waysOf(comp), count: comp.length, edge });
   }
 
   // сетка отрезков для быстрого поиска соседей
@@ -182,7 +283,7 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
     while (q.length) { const v = q.pop()!; comp.push(v); for (const w2 of und.get(v) ?? []) if (trap.has(w2) && !done.has(w2)) { done.add(w2); q.push(w2); } }
     if (comp.length < 3) continue;
     const [lat, lon] = center(comp);
-    errors.push({ key: "trap:" + Math.min(...comp), type: "trap", sev: "warn", lat, lon, ways: waysOf(comp), count: comp.length });
+    errors.push({ key: "trap:" + minId(comp), type: "trap", sev: "warn", lat, lon, ways: waysOf(comp), count: comp.length });
   }
 
   // 5. Атрибуты у крупных улиц и мосты без уровня
