@@ -274,7 +274,7 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .tag-warn { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .chips button { font-size: 12px; min-height: 26px; padding: 0 9px; gap: 5px; }
-.mini-calc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.mini-calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 6px; }
 .mini-calc div { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; display: grid; min-width: 0; }
 .mini-calc b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-calc small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -323,6 +323,16 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .click { cursor: pointer; }
 .click:hover { text-decoration: underline; }
 .calc-tbl td:first-child { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+/* отступ от рамки у первого и последнего столбца, чтобы текст не лип к краю */
+.tbl th:first-child, .tbl td:first-child { padding-left: 10px; }
+.tbl th:last-child, .tbl td:last-child { padding-right: 8px; }
+.tbl td.muted { padding: 10px; }
+.tbl-wrap > .hint { padding: 8px 10px; }
+/* заголовки, по которым можно сортировать */
+.tbl th.sortable { cursor: pointer; user-select: none; }
+.tbl th.sortable:hover { color: var(--fg); }
+.tbl th.sorted { color: var(--accent); }
+.tbl th .icon { vertical-align: -2px; margin-left: 2px; }
 .zpill { display: inline-block; padding: 0 7px; border-radius: 999px; color: #fff; font-weight: 600; text-shadow: 0 0 2px rgba(0, 0, 0, 0.35); }
 .chart-box { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .chart-box canvas { position: absolute; inset: 0; }

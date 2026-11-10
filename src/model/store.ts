@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { OsmData, OsmNode, OsmWay, Tags } from "../osm/types";
 import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
-import { DEFAULT_NORMS, type Norms } from "./calc";
+import { loadNorms, saveNorms, type Norms } from "./calc";
 import { distM, makeProjection, project } from "./geo";
 import { isDrivable, lanesOf, roadClass, type Arm } from "./roads";
 import type { CustomTemplate } from "./templates";
@@ -82,7 +82,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   log: [],
   check: null,
   ignored: new Set(),
-  norms: DEFAULT_NORMS,
+  norms: loadNorms(),
   analysis: [],
   focus: null,
   highlight: [],
@@ -137,7 +137,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   toast: (text) => set({ message: { text, t: Date.now() } }),
   flyTo: (lat, lon, zoom) => set({ focus: { lat, lon, zoom, t: Date.now() } }),
-  setNorms: (norms) => set({ norms, version: get().version + 1 }),
+  setNorms: (norms) => { saveNorms(norms); set({ norms, version: get().version + 1 }); },
   setAnalysis: (analysis) => set({ analysis, version: get().version + 1 }),
   ignore: (key) => { const s = new Set(get().ignored); s.add(key); set({ ignored: s }); get().recheck(); },
   setHighlight: (highlight) => set({ highlight, version: get().version + 1 }),

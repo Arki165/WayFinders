@@ -11,11 +11,12 @@ import {
 } from "../model/roads";
 import { wayLengthM } from "../model/geo";
 import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } from "../model/templates";
-import { calcWay } from "../model/calc";
+import { calcWay, capacityPerLane, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { getMapBounds } from "./MapView";
 import type { OsmNode, OsmWay, Tags } from "../osm/types";
 import Icon from "./Icon";
 import LanePanel from "./LanePanel";
+import GraphSummary from "./GraphSummary";
 import { BUS_LANE_KEYS } from "../model/lanes";
 
 const fmt = (x: number, n = 0) => x.toLocaleString("ru-RU", { minimumFractionDigits: n, maximumFractionDigits: n });
@@ -211,7 +212,8 @@ function WayPanel({ way }: { way: OsmWay }) {
       <div className="mini-calc">
         <div><small>V своб</small><b>{fmt(c.Vfree)} км/ч</b><small>{c.kSurface !== 1 ? `${fmt(c.Vmax)} × ${c.kSurface}` : "по знаку"}</small></div>
         <div><small>T своб</small><b>{fmt(c.Tfree, 2)} мин</b><small>L / V своб</small></div>
-        <div><small>P</small><b>{fmt(c.P)}</b><small>авт/ч</small></div>
+        <div title="Пропускная способность: число полос × норматив полосы (вкладка «Нормативы»)"><small>P, авт/ч</small><b>{fmt(c.P)}</b><small>{c.lanes} пол. × {fmt(capacityPerLane(way, norms))}</small></div>
+        {c.Z !== null && <div title="Коэффициент загрузки Z = N / P, пороги из нормативов"><small>Z</small><b><span className="zpill" style={{ background: `rgb(${Z_COLORS[zLevel(c.Z, norms)].join(",")})` }}>{fmt(c.Z, 2)}</span></b><small>{Z_TEXT[zLevel(c.Z, norms)]}</small></div>}
       </div>
 
       <h3>Шаблоны</h3>
@@ -572,7 +574,7 @@ function SaveTemplate({ ids }: { ids: number[] }) {
   );
 }
 
-// Когда ничего не выделено: подсказка и библиотека своих шаблонов
+// Когда ничего не выделено: подсказка, библиотека своих шаблонов и сводка по графу
 function LibraryPanel() {
   const [list, setList] = useState<CustomTemplate[]>(loadCustom);
   const [edit, setEdit] = useState<CustomTemplate | null>(null);
@@ -605,6 +607,7 @@ function LibraryPanel() {
       <div className="chips">
         <button onClick={() => setEdit({ id: Date.now().toString(36), name: "Новый шаблон", lines: [{ tags: { highway: "secondary", lanes: "2", maxspeed: "60" }, pts: [[-30, 0], [30, 0]] }] })}><Icon name="plus" size={15} />Новый шаблон по точкам</button>
       </div>
+      <GraphSummary />
     </div>
   );
 }

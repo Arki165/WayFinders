@@ -20,6 +20,26 @@ export const DEFAULT_NORMS: Norms = {
   z3: 0.9,
 };
 
+// Нормативы запоминаются между запусками программы.
+// Берем сохраненные значения поверх стандартных, чтобы новые классы и покрытия тоже были.
+const NORMS_KEY = "norms";
+export function loadNorms(): Norms {
+  try {
+    const v = JSON.parse(localStorage.getItem(NORMS_KEY) ?? "{}");
+    return {
+      ...DEFAULT_NORMS,
+      ...v,
+      laneCapacity: { ...DEFAULT_NORMS.laneCapacity, ...v.laneCapacity },
+      surfaceK: { ...DEFAULT_NORMS.surfaceK, ...v.surfaceK },
+    };
+  } catch {
+    return DEFAULT_NORMS;
+  }
+}
+export function saveNorms(n: Norms) {
+  try { localStorage.setItem(NORMS_KEY, JSON.stringify(n)); } catch { /* хранилище недоступно */ }
+}
+
 // Замеры храним в тегах дороги, чтобы они сохранялись в .osm вместе с правками
 export const MEASURE_KEYS = { volume: "wayfinders:volume", time: "wayfinders:travel_time" };
 

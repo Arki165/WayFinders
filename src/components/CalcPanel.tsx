@@ -1,12 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Chart, registerables } from "chart.js";
 import { useEditor, setWayTags } from "../model/store";
-import { calcWay, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
+import { calcWay, DEFAULT_NORMS, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
 import { saveCsv, savePng, toCsv } from "../model/exporting";
 import Icon from "./Icon";
 
 Chart.register(...registerables);
+
+// строка таблицы и сортировка по столбцу
+type Row = { id: number; name: string; c: CalcResult };
+type SortKey = "name" | "L" | "Vfree" | "Tfree" | "P" | "N" | "Tfact" | "Z" | "Vavg" | "q" | "Tdelay" | "D";
+function compareRows(a: Row, b: Row, key: SortKey, dir: 1 | -1): number {
+  if (key === "name") return a.name.localeCompare(b.name, "ru") * dir;
+  const x = a.c[key], y = b.c[key];
+  // пустые значения (нет замера) всегда внизу списка
+  if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+  return (x - y) * dir;
+}
 
 const fmt = (x: number | null, n = 0) => (x === null || !isFinite(x) ? "-" : x.toLocaleString("ru-RU", { minimumFractionDigits: n, maximumFractionDigits: n }));
 type ChartKind = "z" | "time" | "speed";
@@ -22,6 +33,8 @@ export default function CalcPanel() {
   const fileName = useEditor((s) => s.fileName);
   const [kind, setKind] = useState<ChartKind>("z");
   const [showNorms, setShowNorms] = useState(false);
+  // сортировка таблицы: столбец и направление (1 - по возрастанию, -1 - по убыванию)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   // график рисуется в цветах темы: следим за переключением светлой и темной
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   useEffect(() => {
@@ -33,7 +46,16 @@ export default function CalcPanel() {
   const chart = useRef<Chart | null>(null);
 
   const ids = analysis.filter((id) => data?.ways.has(id));
-  const rows: { id: number; name: string; c: CalcResult }[] = data ? ids.map((id) => { const w = data.ways.get(id)!; return { id, name: wayName(w), c: calcWay(data, w, norms) }; }) : [];
+  const rows: Row[] = data ? ids.map((id) => { const w = data.ways.get(id)!; return { id, name: wayName(w), c: calcWay(data, w, norms) }; }) : [];
+  if (sort) rows.sort((a, b) => compareRows(a, b, sort.key, sort.dir));
+  // клик по заголовку: по возрастанию, потом по убыванию, потом как добавляли
+  const clickSort = (key: SortKey) => setSort(!sort || sort.key !== key ? { key, dir: 1 } : sort.dir === 1 ? { key, dir: -1 } : null);
+  const Th = ({ k, children, title }: { k: SortKey; children: ReactNode; title?: string }) => (
+    <th className={"sortable" + (k === "name" ? "" : " r") + (sort?.key === k ? " sorted" : "")} title={title ?? "Сортировать"} onClick={() => clickSort(k)}>
+      {children}
+      {sort?.key === k && <Icon name={sort.dir === 1 ? "chevronUp" : "chevronDown"} size={12} />}
+    </th>
+  );
 
   // график перерисовывается после любой правки
   useEffect(() => {
@@ -73,7 +95,7 @@ export default function CalcPanel() {
       },
       plugins: [{ id: "bg", beforeDraw: (c) => { const ctx = c.ctx; ctx.save(); ctx.fillStyle = bg; ctx.fillRect(0, 0, c.width, c.height); ctx.restore(); } }],
     });
-  }, [kind, version, norms, analysis.join(), theme]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, version, norms, analysis.join(), theme, sort?.key, sort?.dir]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => chart.current?.destroy(), []);
 
   if (!data) return <p className="hint pad">Откройте файл .osm</p>;
@@ -109,7 +131,10 @@ export default function CalcPanel() {
           <div className="tbl-wrap">
             <table className="tbl calc-tbl">
               <thead>
-                <tr><th>Участок</th><th className="r">L, км</th><th className="r">V своб</th><th className="r">T своб, мин</th><th className="r">P</th><th className="r">N, авт/ч</th><th className="r">T факт, мин</th><th className="r">Z</th><th className="r">V ср</th><th className="r">q</th><th className="r">T зад</th><th className="r">D, %</th><th /></tr>
+                <tr>
+                  <Th k="name">Участок</Th><Th k="L">L, км</Th><Th k="Vfree">V своб</Th><Th k="Tfree">T своб, мин</Th><Th k="P">P</Th><Th k="N">N, авт/ч</Th>
+                  <Th k="Tfact">T факт, мин</Th><Th k="Z">Z</Th><Th k="Vavg">V ср</Th><Th k="q">q</Th><Th k="Tdelay">T зад</Th><Th k="D">D, %</Th><th />
+                </tr>
               </thead>
               <tbody>
                 {rows.map(({ id, name, c }) => (
@@ -152,15 +177,27 @@ export default function CalcPanel() {
 function NormsEditor() {
   const norms = useEditor((s) => s.norms);
   const setNorms = useEditor((s) => s.setNorms);
-  const upd = (patch: Partial<Norms>) => setNorms({ ...norms, ...patch });
-  const num = (v: string, min = 0) => Math.max(min, Number(v.replace(",", ".")) || 0);
+  // число применяется сразу при вводе, с небольшой паузой, чтобы большой город не пересчитывался на каждую цифру
+  const timer = useRef<number>(0);
+  const upd = (patch: Partial<Norms>) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const cur = useEditor.getState().norms;
+      setNorms({ ...cur, ...patch, laneCapacity: { ...cur.laneCapacity, ...patch.laneCapacity }, surfaceK: { ...cur.surfaceK, ...patch.surfaceK } });
+    }, 250);
+  };
+  // пустое или неверное число не применяем, пока пользователь еще печатает
+  const num = (v: string) => { const x = Number(v.replace(",", ".")); return v.trim() === "" || !isFinite(x) ? null : x; };
+  const isDefault = JSON.stringify(norms) === JSON.stringify(DEFAULT_NORMS);
+  // после сброса поля создаются заново, чтобы показать стандартные числа
+  const [resets, setResets] = useState(0);
   return (
     <div className="norms">
       <table className="tbl">
         <thead><tr><th>Класс дороги</th><th className="r">Полоса, авт/ч</th></tr></thead>
         <tbody>
           {Object.entries(norms.laneCapacity).map(([k, v]) => (
-            <tr key={k}><td>{k === "link" ? "Съезды" : ROAD_CLASSES[k]?.ru ?? k}</td><td className="r"><input type="number" defaultValue={v} onBlur={(e) => upd({ laneCapacity: { ...norms.laneCapacity, [k]: num(e.target.value, 1) } })} /></td></tr>
+            <tr key={k}><td>{k === "link" ? "Съезды" : ROAD_CLASSES[k]?.ru ?? k}</td><td className="r"><input type="number" defaultValue={v} key={"c" + k + resets} onChange={(e) => { const x = num(e.target.value); if (x !== null && x >= 1) upd({ laneCapacity: { [k]: x } }); }} /></td></tr>
           ))}
         </tbody>
       </table>
@@ -168,7 +205,7 @@ function NormsEditor() {
         <thead><tr><th>Покрытие</th><th className="r">Коэффициент скорости</th></tr></thead>
         <tbody>
           {Object.entries(norms.surfaceK).map(([k, v]) => (
-            <tr key={k}><td>{SURFACES[k]?.ru ?? k}</td><td className="r"><input type="number" step="0.05" defaultValue={v} onBlur={(e) => upd({ surfaceK: { ...norms.surfaceK, [k]: Math.min(1, num(e.target.value)) } })} /></td></tr>
+            <tr key={k}><td>{SURFACES[k]?.ru ?? k}</td><td className="r"><input type="number" step="0.05" defaultValue={v} key={"s" + k + resets} onChange={(e) => { const x = num(e.target.value); if (x !== null && x > 0 && x <= 1) upd({ surfaceK: { [k]: x } }); }} /></td></tr>
           ))}
         </tbody>
       </table>
@@ -176,11 +213,15 @@ function NormsEditor() {
         <thead><tr><th>Порог Z</th><th className="r">От</th></tr></thead>
         <tbody>
           {(["z1", "z2", "z3"] as const).map((k, i) => (
-            <tr key={k}><td><span className="zpill" style={{ background: `rgb(${Z_COLORS[i + 1].join(",")})` }}>{Z_TEXT[i + 1]}</span></td><td className="r"><input type="number" step="0.05" defaultValue={norms[k]} onBlur={(e) => upd({ [k]: num(e.target.value) })} /></td></tr>
+            <tr key={k}><td><span className="zpill" style={{ background: `rgb(${Z_COLORS[i + 1].join(",")})` }}>{Z_TEXT[i + 1]}</span></td><td className="r"><input type="number" step="0.05" key={k + resets} defaultValue={norms[k]} onChange={(e) => { const x = num(e.target.value); if (x !== null && x > 0) upd({ [k]: x }); }} /></td></tr>
           ))}
         </tbody>
       </table>
-      <p className="hint">Значения условные. Пропускную способность, коэффициенты покрытия и пороги задают транспортники по нормативам.</p>
+      <p className="hint">
+        Значения условные. Пропускную способность, коэффициенты покрытия и пороги задают транспортники по нормативам.
+        Изменения сразу видны в таблице, на карте «Загрузка Z» и в свойствах дороги, и запоминаются до следующего запуска.
+      </p>
+      <div className="chips"><button disabled={isDefault} onClick={() => { window.clearTimeout(timer.current); setNorms(DEFAULT_NORMS); setResets(resets + 1); }}>Сбросить к стандартным</button></div>
     </div>
   );
 }
