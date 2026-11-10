@@ -5,6 +5,53 @@ import { writeOsm } from "../osm/write";
 import { saveOsmText } from "../model/exporting";
 
 // ---------- загрузка района из OpenStreetMap (Overpass API) ----------
+// Серверы Overpass по порядку: если первый перегружен или недоступен, пробуем следующий.
+const OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://z.overpass-api.de/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
+
+// Запрос к Overpass. Подпись программы (User-Agent) ставит electron/main.cjs:
+// с подписью браузера overpass-api.de отвечает 406.
+async function overpass(q: string): Promise<string> {
+  const fails: string[] = [];
+  for (const url of OVERPASS) {
+    const host = new URL(url).host;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body: "data=" + encodeURIComponent(q),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        signal: AbortSignal.timeout(240_000), // зависший сервер не держит загрузку дольше 4 минут
+      });
+      if (res.ok) return res.text();
+      // 400 - ошибка в самом запросе, другой сервер ответит так же
+      if (res.status === 400) throw new Error("Сервер Overpass не понял запрос (400)");
+      fails.push(`${host}: ${res.status}`);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("(400)")) throw e;
+      fails.push(`${host}: нет ответа`);
+    }
+  }
+  const why = fails.join(", ");
+  if (why.includes("406")) throw new Error(`Серверы Overpass отклонили запрос (${why}). Запускайте загрузку из программы WayFinders, а не из браузера.`);
+  throw new Error(`Серверы Overpass сейчас перегружены (${why}). Попробуйте через минуту или загрузите меньшую область.`);
+}
+
+// Найти границу города по названию. В OSM граница часто называется не "Иркутск",
+// а "городской округ Иркутск", поэтому ищем точку города (place=city/town)
+// и берем самую мелкую административную границу, в которую она попадает.
+async function findCityArea(city: string): Promise<number> {
+  const q = `[out:json][timeout:60];node["place"~"^(city|town)$"]["name"="${city}"]->.p;.p is_in->.a;area.a["boundary"="administrative"]["admin_level"~"^[5-8]$"];out tags;`;
+  const els: { id: number; tags: Record<string, string> }[] = JSON.parse(await overpass(q)).elements;
+  if (!els.length) throw new Error(`Город «${city}» не найден в OpenStreetMap. Проверьте написание, например «Ангарск».`);
+  // граница с точным названием лучше всего, иначе самая мелкая (больший admin_level)
+  const exact = els.find((e) => e.tags.name === city);
+  if (exact) return exact.id;
+  return els.reduce((a, b) => (Number(b.tags.admin_level) > Number(a.tags.admin_level) ? b : a)).id;
+}
+
 export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getBounds: () => [number, number, number, number] | null }) {
   const load = useEditor((s) => s.load);
   const [city, setCity] = useState("");
@@ -17,26 +64,29 @@ export function ImportDialog({ onClose, getBounds }: { onClose: () => void; getB
 
   async function run(kind: "view" | "city") {
     setErr("");
-    let q: string;
-    let name: string;
+    // название без кавычек и обратных слешей, чтобы не сломать запрос
+    const cityName = city.trim().replace(/["\\]/g, "");
+    const b = getBounds();
     if (kind === "view") {
-      const b = getBounds();
       if (!b) return setErr("Карта еще не готова");
       const [s, w, n, e] = b;
       if ((n - s) * (e - w) > 0.02) return setErr("Область слишком большая, приблизьте карту или загрузите город по названию");
-      q = body("").replace(/\(A\)/g, `(${s},${w},${n},${e})`);
-      name = `area_${s.toFixed(3)}_${w.toFixed(3)}.osm`;
-    } else {
-      if (!city.trim()) return setErr("Введите название города");
-      q = `[out:xml][timeout:180];area["name"="${city.trim().replace(/"/g, "")}"]["boundary"="administrative"]->.a;` + body("").replace("[out:xml][timeout:120];", "").replace(/\(A\)/g, "(area.a)");
-      name = `${city.trim()}.osm`;
-    }
+    } else if (!cityName) return setErr("Введите название города");
     setBusy(true);
     try {
       const t0 = performance.now();
-      const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-      if (!res.ok) throw new Error(`Сервер Overpass ответил ${res.status}`);
-      const text = await res.text();
+      let q: string;
+      let name: string;
+      if (kind === "view") {
+        const [s, w, n, e] = b!;
+        q = body("").replace(/\(A\)/g, `(${s},${w},${n},${e})`);
+        name = `area_${s.toFixed(3)}_${w.toFixed(3)}.osm`;
+      } else {
+        const areaId = await findCityArea(cityName);
+        q = `[out:xml][timeout:180];area(${areaId})->.a;` + body("").replace("[out:xml][timeout:120];", "").replace(/\(A\)/g, "(area.a)");
+        name = `${cityName}.osm`;
+      }
+      const text = await overpass(q);
       const data = parseOsm(text);
       if (!data.ways.size) throw new Error("В этой области нет дорог");
       load(data, name, null);

@@ -1,5 +1,5 @@
 // Главный процесс Electron: окно приложения и работа с файлами
-const { app, BrowserWindow, ipcMain, dialog, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, screen, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -74,5 +74,19 @@ ipcMain.handle("write-file", async (_e, { filePath, text }) => {
   return filePath;
 });
 
-app.whenReady().then(createWindow);
+// Overpass API отвечает 406 на запросы с подписью браузера (а Electron подписывается как Chrome).
+// Для запросов к Overpass представляемся программой со ссылкой на проект, как просят правила сервера.
+function setOverpassUserAgent() {
+  const ua = `WayFinders/${app.getVersion()} (+https://github.com/Arki165/WayFinders)`;
+  const urls = ["https://overpass-api.de/*", "https://*.overpass-api.de/*"];
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
+    details.requestHeaders["User-Agent"] = ua;
+    callback({ requestHeaders: details.requestHeaders });
+  });
+}
+
+app.whenReady().then(() => {
+  setOverpassUserAgent();
+  createWindow();
+});
 app.on("window-all-closed", () => app.quit());
