@@ -44,6 +44,7 @@ const ICONS = {
   swap: <path d="M8 20V4M4.5 7.5L8 4l3.5 3.5M16 4v16M12.5 16.5L16 20l3.5-3.5" />,
   // шаблоны-вставки
   bridge: <><path d="M2 8h20M5 8v12M19 8v12" /><path d="M5 18.5c3.5-6 10.5-6 14 0" /></>,
+  layers: <><path d="M12 3.5l9 4.5-9 4.5-9-4.5z" /><path d="M3 12.5l9 4.5 9-4.5" /><path d="M3 16.5l9 4.5 9-4.5" /></>,
   roundabout: <><circle cx="12" cy="12" r="4.5" /><path d="M12 2v5.5M12 16.5V22M2 12h5.5M16.5 12H22" /></>,
   uturn: <><path d="M7 21V10a5 5 0 0 1 10 0v6" /><path d="M13.5 13l3.5 3.5 3.5-3.5" /></>,
   turnLeft: <><path d="M18 21v-7a4 4 0 0 0-4-4H5" /><path d="M9 6l-4 4 4 4" /></>,

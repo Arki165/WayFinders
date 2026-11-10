@@ -1,6 +1,7 @@
 // Панель «Слои» на карте: уровень (город или метро) и что показывать
 import { useState } from "react";
 import { ICONS } from "./mapIcons";
+import Icon from "./Icon";
 
 export type Level = "city" | "metro";
 export type LayerKey = "roads" | "lanes" | "signals" | "crossings" | "stops" | "metro" | "rail" | "paths" | "errors";
@@ -43,7 +44,7 @@ export default function LayersPanel({ level, show, onLevel, onShow, metroCount }
   return (
     <div className={"layers" + (open ? " open" : "")}>
       <button className="layers-head" onClick={() => setOpen(!open)} title="Уровни карты и слои: что показывать">
-        ☰ Слои{level === "metro" ? ": метро" : ""}{hidden ? ` (скрыто ${hidden})` : ""} <span className="muted">{open ? "▴" : "▾"}</span>
+        <Icon name="layers" size={14} />Слои{level === "metro" ? ": метро" : ""}{hidden ? ` (скрыто ${hidden})` : ""} <Icon name={open ? "chevronUp" : "chevronDown"} size={13} className="muted" />
       </button>
       {open && (
         <div className="layers-body">

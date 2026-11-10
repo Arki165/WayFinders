@@ -449,7 +449,7 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 
 /* панель «Слои» на карте: справа под кнопками масштаба и «Весь граф» */
 .layers { position: absolute; right: 10px; top: 150px; z-index: 2; max-height: calc(100% - 160px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; max-width: 230px; box-shadow: var(--shadow); }
-.layers-head { border: 0; background: transparent; width: 100%; text-align: left; justify-content: flex-start; padding: 5px 9px; }
+.layers-head { border: 0; background: transparent; width: 100%; text-align: left; justify-content: flex-start; padding: 5px 9px; display: flex; align-items: center; gap: 5px; }
 .layers-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 9px 9px; min-height: 0; overflow-y: auto; }
 .layers-level { margin-bottom: 2px; }
 .layers-level button { flex: 1; }

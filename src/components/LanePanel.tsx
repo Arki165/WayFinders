@@ -1,7 +1,8 @@
 // Панель полос выбранной дороги: схема поперек дороги и свойства выбранной полосы
 import { setWayTags } from "../model/store";
-import { addLane, canCross, getLanes, lanesToTags, setCross, setDir, turnArrows, useLane, TURNS, LANE_WIDTH, type Lane, type LaneKind, type Lanes } from "../model/lanes";
+import { addLane, canCross, getLanes, lanesToTags, setCross, setDir, useLane, TURNS, LANE_WIDTH, type Lane, type LaneKind, type Lanes } from "../model/lanes";
 import { maxSpeed } from "../model/roads";
+import { DirIcon, TurnIcon } from "./turnIcons";
 import type { OsmWay } from "../osm/types";
 
 const KINDS: [LaneKind, string][] = [["general", "Общая"], ["bus", "Автобус"], ["bicycle", "Велосипед"]];
@@ -39,8 +40,8 @@ export default function LanePanel({ way }: { way: OsmWay }) {
       <div className="lanes-strip" title="Схема поперек дороги, если смотреть по направлению линии">
         {lanes.map((l, i) => (
           <button key={i} className={`lane-btn k-${l.kind}${i === index ? " on" : ""}`} onClick={() => setSel(i === index ? null : { wayId: way.id, index: i })} title={(l.dir === "forward" ? "Туда" : "Обратно") + (l.turn ? ", " + l.turn : "")}>
-            <b>{l.dir === "forward" ? "↑" : "↓"}</b>
-            <small>{turnArrows(l.turn) || "·"}</small>
+            <b><DirIcon back={l.dir !== "forward"} /></b>
+            <small>{l.turn ? <TurnIcon turn={l.turn} size={14} /> : "·"}</small>
           </button>
         ))}
       </div>
@@ -56,13 +57,13 @@ export default function LanePanel({ way }: { way: OsmWay }) {
           <span>Направление</span>
           <div className="seg">
             {(["forward", "backward"] as const).map((d) => (
-              <button key={d} className={lane.dir === d ? "on" : ""} onClick={() => { if (lane.dir === d) return; const r = setDir(lanes, index!, d); save(r.lanes, "Направление полосы", r.index); }}>{d === "forward" ? "↑ Туда" : "↓ Обратно"}</button>
+              <button key={d} className={lane.dir === d ? "on" : ""} onClick={() => { if (lane.dir === d) return; const r = setDir(lanes, index!, d); save(r.lanes, "Направление полосы", r.index); }}><DirIcon back={d !== "forward"} />{d === "forward" ? "Туда" : "Обратно"}</button>
             ))}
           </div>
           <span>Поворот</span>
           <div className="seg">
-            {TURNS.map(([t, name, arrow]) => (
-              <button key={t} title={name} className={lane.turn.split(";").includes(t) ? "on" : ""} onClick={() => toggleTurn(t)}>{arrow}</button>
+            {TURNS.map(([t, name]) => (
+              <button key={t} title={name} className={lane.turn.split(";").includes(t) ? "on" : ""} onClick={() => toggleTurn(t)}><TurnIcon turn={t} /></button>
             ))}
           </div>
           {(["left", "right"] as const).map((side) => {

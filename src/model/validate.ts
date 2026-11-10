@@ -3,6 +3,7 @@
 import type { OsmData, OsmRelation } from "../osm/types";
 import { isDrivable } from "./roads";
 import { makeProjection, project } from "./geo";
+import { buildingIndex, wayThroughBuilding } from "./buildings";
 
 // ---------- граница города ----------
 // Город из OSM скачивается по своей границе (Dialogs.tsx кладет ее в файл как отношение boundary=administrative).
@@ -98,7 +99,7 @@ function cityClips(data: OsmData): Clip[] {
 }
 
 export type Severity = "danger" | "warn" | "info";
-export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge";
+export type ErrorType = "torn" | "glued" | "isolated" | "trap" | "attr" | "bridge" | "building";
 
 export interface GraphError {
   key: string;
@@ -297,7 +298,8 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
     errors.push({ key: "trap:" + minId(comp), type: "trap", sev: "warn", lat, lon, ways: waysOf(comp), count: comp.length });
   }
 
-  // 5. Атрибуты у крупных улиц и мосты без уровня
+  // 5. Атрибуты у крупных улиц, мосты без уровня, дороги сквозь здания
+  const bix = buildingIndex(data);
   for (const w of roads) {
     const mid = data.nodes.get(w.nodeIds[Math.floor(w.nodeIds.length / 2)])!;
     if (["primary", "secondary", "tertiary", "trunk"].includes(w.tags.highway)) {
@@ -305,6 +307,9 @@ export function validate(data: OsmData, ignored: Set<string> = new Set()): Valid
       if (miss.length) errors.push({ key: "attr:" + w.id, type: "attr", sev: "info", lat: mid.lat, lon: mid.lon, ways: [w.id], miss });
     }
     if (w.tags.bridge === "yes" && !w.tags.layer) errors.push({ key: "bridge:" + w.id, type: "bridge", sev: "warn", lat: mid.lat, lon: mid.lon, ways: [w.id] });
+    // в Webots машина проедет сквозь стену, а в жизни такой дороги нет
+    const hit = wayThroughBuilding(data, bix, w);
+    if (hit) errors.push({ key: "building:" + w.id, type: "building", sev: "danger", lat: hit.at.lat, lon: hit.at.lon, ways: [w.id, hit.b.id] });
   }
 
   return { errors: errors.filter((e) => !ignored.has(e.key)), nodes: ids.length, sccMain: mainS.size, components: compList.length };

@@ -5,6 +5,7 @@ import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { loadNorms, saveNorms, type Norms } from "./calc";
 import { distM, makeProjection, project } from "./geo";
+import { buildingAt, buildingIndex, buildingsOnSegment, mayCrossBuildings } from "./buildings";
 import { isDrivable, lanesOf, roadClass, type Arm } from "./roads";
 import type { CustomTemplate } from "./templates";
 
@@ -174,17 +175,39 @@ export function setNodeTags(nodeId: number, tags: Tags, label: string) {
   ed().run(label, [], [nodeId], () => { const n = d.nodes.get(nodeId); if (n) n.tags = { ...tags }; });
 }
 
+// ---------- дороги и здания ----------
+export const THROUGH_BUILDING = "Дорога не может проходить сквозь здание. Обойдите его или сделайте мост (панель дороги: «Мост»)";
+
+// Проверка новой линии: точки не внутри здания и отрезки не сквозь здание. Мосты, тоннели и сами здания не проверяются.
+export function lineHitsBuilding(points: { lat: number; lon: number }[], tags: Tags): boolean {
+  const d = ed().data;
+  if (!d || tags.building || mayCrossBuildings({ id: 0, nodeIds: [], tags, attrs: {} }) || (tags.railway === "tram" && tags.embedded === "yes")) return false;
+  const ix = buildingIndex(d);
+  return points.some((p, i) => buildingAt(ix, p) !== null || (i > 0 && buildingsOnSegment(ix, points[i - 1], p).length > 0));
+}
+
 export function moveNodeDone(nodeId: number, from: [number, number]) {
   // узел уже передвинут во время перетаскивания, записываем команду в историю
   const d = ed().data!;
   const n = d.nodes.get(nodeId)!;
   const to: [number, number] = [n.lat, n.lon];
   n.lat = from[0]; n.lon = from[1];
+  // узел дороги нельзя затащить так, чтобы дорога прошла сквозь здание: узел возвращается на место
+  const ix = buildingIndex(d);
+  const bad = [...d.ways.values()].some((w) => {
+    const i = w.nodeIds.indexOf(nodeId);
+    if (i < 0 || !isDrivable(w) || mayCrossBuildings(w)) return false;
+    const at = { lat: to[0], lon: to[1] };
+    if (buildingAt(ix, at)) return true;
+    return [w.nodeIds[i - 1], w.nodeIds[i + 1]].some((id) => { const m = id !== undefined ? d.nodes.get(id) : undefined; return !!m && buildingsOnSegment(ix, m, at).length > 0; });
+  });
+  if (bad) { ed().bump(); return ed().toast(THROUGH_BUILDING); }
   ed().run("Перенос узла", [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; });
 }
 
 export function addWay(points: { id: number | null; lat: number; lon: number }[], tags: Tags) {
   const d = ed().data!;
+  if (lineHitsBuilding(points, tags)) { ed().toast(THROUGH_BUILDING); return false; }
   let wid = 0;
   const track = !!tags.railway;
   // рельсы могут получить переезды на дорогах, эти дороги нужны в снимке для отмены
@@ -207,6 +230,7 @@ export function addWay(points: { id: number | null; lat: number; lon: number }[]
     if (track) addLevelCrossings(d, d.ways.get(wid)!);
   });
   ed().select({ kind: "way", id: wid });
+  return true;
 }
 
 export function deleteWay(wayId: number) {
@@ -446,6 +470,7 @@ export function fixError(e: GraphError) {
     });
   }
   if (e.type === "bridge") ed().run("Мост поднят над дорогой", e.ways, [], () => { d.ways.get(e.ways[0])!.tags.layer = "1"; });
+  if (e.type === "building") bridgeOverBuilding(e.ways[0]);
 }
 
 // ---------- общие помощники ----------
@@ -765,7 +790,8 @@ export function makeTurn(nodeId: number, side: "left" | "right", R = 15, tail = 
 }
 
 // Мост на дороге: над пересечением с другой дорогой (или посередине), по half метров в каждую сторону
-export function insertBridge(wayId: number, half = 25) {
+// span - готовый участок моста в метрах от начала дороги (мост над зданием)
+export function insertBridge(wayId: number, half = 25, span?: [number, number], layer = 1) {
   const d = ed().data!;
   const w = d.ways.get(wayId);
   if (!w) return;
@@ -777,8 +803,8 @@ export function insertBridge(wayId: number, half = 25) {
   const L = s[s.length - 1];
   const hits = crossingsOf(d, w, P).map((h) => s[h.i - 1] + h.t * (s[h.i] - s[h.i - 1]));
   const at = hits.length ? hits.sort((a, b) => Math.abs(a - L / 2) - Math.abs(b - L / 2))[0] : L / 2;
-  const bridgeTags = (x: OsmWay) => { x.tags = { ...x.tags, bridge: "yes", layer: "1" }; delete x.tags.tunnel; };
-  if (L < 2 * half + 10) {
+  const bridgeTags = (x: OsmWay) => { x.tags = { ...x.tags, bridge: "yes", layer: String(layer) }; delete x.tags.tunnel; };
+  if (span ? span[1] - span[0] > L - 6 : L < 2 * half + 10) {
     ed().run("Шаблон: мост", [wayId], [], () => bridgeTags(w));
     return ed().toast("Дорога короткая: мостом стала вся");
   }
@@ -794,11 +820,34 @@ export function insertBridge(wayId: number, half = 25) {
     return id;
   };
   ed().run("Шаблон: мост", [wayId], [], () => {
-    const n1 = nodeAt(Math.max(0, at - half)), n2 = nodeAt(Math.min(L, at + half));
+    const [x1, x2] = span ?? [at - half, at + half];
+    const n1 = nodeAt(Math.max(0, x1)), n2 = nodeAt(Math.min(L, x2));
     bridgeTags(d.ways.get(cutWay(d, w, n1, n2))!);
   });
   ed().select({ kind: "way", id: wayId });
-  ed().toast(hits.length ? "Мост поставлен над пересечением с другой дорогой" : "Мост поставлен в середине дороги");
+  ed().toast(span ? "Мост поставлен над зданием, высота по крыше" : hits.length ? "Мост поставлен над пересечением с другой дорогой" : "Мост поставлен в середине дороги");
+}
+
+// Мост над зданием, сквозь которое идет дорога: от 12 м до здания до 12 м после
+export function bridgeOverBuilding(wayId: number) {
+  const d = ed().data!;
+  const w = d.ways.get(wayId);
+  if (!w) return;
+  const ix = buildingIndex(d);
+  let s = 0, first = -1, last = -1, roof = 0;
+  for (let i = 1; i < w.nodeIds.length; i++) {
+    const a = d.nodes.get(w.nodeIds[i - 1])!, b = d.nodes.get(w.nodeIds[i])!;
+    const len = distM(a.lat, a.lon, b.lat, b.lon), n = Math.max(1, Math.ceil(len));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n;
+      const bl = buildingAt(ix, { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t });
+      if (bl) { if (first < 0) first = s + len * t; last = s + len * t; roof = Math.max(roof, bl.h); }
+    }
+    s += len;
+  }
+  if (first < 0) return ed().toast("Здание под дорогой не найдено");
+  // уровень моста: по 6 м на уровень, выше крыши хотя бы на 4 м (симуляторы читают layer)
+  insertBridge(wayId, 25, [first - 12, last + 12], Math.max(1, Math.ceil((roof + 4) / 6)));
 }
 
 // ---------- пешеходный переход ----------

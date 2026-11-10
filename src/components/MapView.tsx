@@ -5,11 +5,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, addWay, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
-import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, turnArrows, useLane } from "../model/lanes";
+import { dashes, getLanes, laneWidth, markBetween, offsetPath, pathLength, pointAt, roadWidth, useLane } from "../model/lanes";
+import { buildingIndex, tallestUnder } from "../model/buildings";
+import { BUS_LETTER_URL, turnIconUrl } from "./turnIcons";
 import { cityPois, isMetroWay, metroLineCount, metroLines, zebras, type Poi, type PoiKind } from "../model/poi";
 
 const POI_TEXT: Record<PoiKind, string> = { crossing: "Пешеходный переход", bus: "Автобусная остановка", tram: "Трамвайная остановка", train: "Ж/д станция или платформа", metro: "Станция метро", entrance: "Вход в метро" };
@@ -196,11 +198,52 @@ type RoadItem = { id: number; path: P3[]; color: [number, number, number, number
 type Pt = { id: number; pos: [number, number] };
 type LaneItem = { wayId: number; index: number; path: P3[]; kind: string; width: number };
 
-// Линия дороги с высотой: мост поднят над землей, концы на земле
-function roadPath(data: OsmData, w: OsmWay): P3[] {
-  const lvl = parseInt(w.tags.layer ?? "0", 10) || 0;
-  const z = w.tags.bridge === "yes" ? Math.max(1, lvl) * 6 : 0;
-  return w.nodeIds.map((id, i): P3 => { const n = data.nodes.get(id)!; return [n.lon, n.lat, i === 0 || i === w.nodeIds.length - 1 ? 0 : z]; });
+// Высота мостов и какие концы мостов стыкуются с другим мостом (там съезда на землю нет)
+interface Bridges { h: Map<number, number>; joint: Set<number> }
+
+// Мосты: высота по уровню (layer × 6 м), а над зданием - выше самой высокой крыши на 4 м
+function bridgeInfo(data: OsmData): Bridges {
+  const h = new Map<number, number>(), joint = new Set<number>(), cnt = new Map<number, number>();
+  const list = [...data.ways.values()].filter((w) => w.tags.bridge === "yes" && isDrivable(w) && w.nodeIds.length >= 2);
+  if (!list.length) return { h, joint };
+  const ix = buildingIndex(data);
+  for (const w of list) {
+    const lvl = Math.max(1, parseInt(w.tags.layer ?? "1", 10) || 1);
+    const roof = tallestUnder(data, ix, w);
+    h.set(w.id, Math.max(lvl * 6, roof ? roof + 4 : 0));
+    for (const id of [w.nodeIds[0], w.nodeIds[w.nodeIds.length - 1]]) cnt.set(id, (cnt.get(id) ?? 0) + 1);
+  }
+  for (const [id, c] of cnt) if (c > 1) joint.add(id);
+  return { h, joint };
+}
+
+// Линия дороги с высотой. Мост поднимается плавно: съезд длиной до трети моста (не меньше 20 м),
+// по кривой без изломов, а не вертикальной ступенькой от крайнего узла («буквой Г»).
+const M_DEG = 111320;
+function roadPath(data: OsmData, w: OsmWay, br?: Bridges): P3[] {
+  const pts = w.nodeIds.map((id) => data.nodes.get(id)!);
+  const H = br?.h.get(w.id) ?? 0;
+  if (!H) return pts.map((n): P3 => [n.lon, n.lat, 0]);
+  const k = Math.cos((pts[0].lat * Math.PI) / 180) * M_DEG;
+  const s = [0];
+  for (let i = 1; i < pts.length; i++) s.push(s[i - 1] + Math.hypot((pts[i].lon - pts[i - 1].lon) * k, (pts[i].lat - pts[i - 1].lat) * M_DEG));
+  const L = s[s.length - 1];
+  const R = Math.min(L * 0.4, Math.max(20, H * 4));
+  const up0 = !br!.joint.has(w.nodeIds[0]), up1 = !br!.joint.has(w.nodeIds[w.nodeIds.length - 1]);
+  const z = (x: number) => {
+    const t = Math.min(1, Math.min(up0 ? x : Infinity, up1 ? L - x : Infinity) / R);
+    return H * t * t * (3 - 2 * t);
+  };
+  // точки через 3 м, чтобы подъем был гладким
+  const out: P3[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil((s[i] - s[i - 1]) / 3));
+    for (let j = i === 1 ? 0 : 1; j <= n; j++) {
+      const t = j / n;
+      out.push([a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t, z(s[i - 1] + (s[i] - s[i - 1]) * t)]);
+    }
+  }
+  return out;
 }
 
 // Значки светофоров, переходов и остановок - с той же линейки 100 м, дальше светофоры точками
@@ -278,6 +321,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     map.addControl(overlay);
     mapRef.current = map;
     currentMap = map;
+    // для проверок в режиме разработки: window.wfMap.project([lon, lat]) дает точку на экране
+    if (import.meta.env.DEV) (window as unknown as { wfMap: maplibregl.Map }).wfMap = map;
     overlayRef.current = overlay;
     map.on("zoomend", () => setZoom(map.getZoom()));
     map.on("load", () => { applyDark(); applyGlobe(); }); // уровень «Метро» мог остаться с прошлого запуска
@@ -354,7 +399,12 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         if (nodeId === null && wayId === null) st.setHighlight([]);
       } else if (t === "draw") {
         const p = nodeId !== null ? st.data.nodes.get(nodeId)! : null;
-        setDraw((d) => [...d, p ? { id: p.id, lat: p.lat, lon: p.lon } : { id: null, lat: e.lngLat.lat, lon: e.lngLat.lng }]);
+        const pt = p ? { id: p.id, lat: p.lat, lon: p.lon } : { id: null, lat: e.lngLat.lat, lon: e.lngLat.lng };
+        // дорогу сквозь здание не рисуем: точка не ставится, программа объясняет почему
+        const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
+        const prev = live.current.draw;
+        if (lineHitsBuilding(prev.length ? [prev[prev.length - 1], pt] : [pt], tpl.tags)) return st.toast(THROUGH_BUILDING);
+        setDraw((d) => [...d, pt]);
       } else if (t === "node") {
         if (nodeId !== null) { st.select({ kind: "node", id: nodeId }); return st.toast("Здесь уже есть узел"); }
         if (wayId === null) return st.toast("Кликните по линии дороги, туда встанет новый узел");
@@ -412,7 +462,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     if (pts.length < 2) return useEditor.getState().toast("Нужно минимум две точки");
     const tpl = TEMPLATES[live.current.drawTemplate] ?? TEMPLATES.secondary;
     if (tpl.kind === "area" && pts.length < 3) return useEditor.getState().toast("Для здания нужно минимум три угла");
-    addWay(pts, tpl.tags);
+    if (!addWay(pts, tpl.tags)) return;
     useEditor.getState().toast(tpl.kind === "area" ? "Здание добавлено. Этажность меняется справа" : `Добавлено по шаблону «${tpl.name}»`);
   }
 
@@ -467,12 +517,13 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const roads: RoadItem[] = [], others: Line[] = [], crossings: Line[] = [], transit: Line[] = [], buildings: { id: number; poly: [number, number][]; h: number }[] = [];
     const deg = new Map<number, number>();
     const ways = [...data.ways.values()];
+    const br = bridgeInfo(data);
     const coord = (id: number): [number, number] => { const n = data.nodes.get(id)!; return [n.lon, n.lat]; };
     for (const w of ways) {
       if (w.nodeIds.length < 2) continue;
       if (isDrivable(w)) {
         for (const id of w.nodeIds) deg.set(id, (deg.get(id) ?? 0) + 1);
-        const path = roadPath(data, w);
+        const path = roadPath(data, w, br);
         let color: [number, number, number, number] = [...roadClass(w).color, 255];
         if (heat) { const c = calcWay(data, w, norms); color = c.Z !== null ? [...Z_COLORS[zLevel(c.Z, norms)], 255] : [180, 180, 180, 160]; }
         if (w.tags.tunnel === "yes") color = [color[0], color[1], color[2], 110];
@@ -520,7 +571,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pois: Poi[] = cityPois(data);
     const metro = metroLines(data);
     const zebra = zebras(data, pois);
-    return { roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
+    return { br, roads, others, crossings, transit, buildings, junctions, signals, arrows, pois, metro, zebra, metroCount: metro.length ? metroLineCount(data, metro) : 0 };
   }, [data, version, heat, norms, showBuildings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- полосы и разметка в видимой части карты ----------
@@ -536,7 +587,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const dashed = (path: P3[]) => { for (const d of dashes(path)) lines.push({ path: d }); };
     for (const w of data.ways.values()) {
       if (!isDrivable(w) || w.nodeIds.length < 2 || !color.has(w.id)) continue;
-      const path = roadPath(data, w);
+      const path = roadPath(data, w, layersData.br);
       if (!path.some(inView)) continue;
       const lanes = getLanes(w), n = lanes.length;
       const widths = lanes.map(laneWidth);
@@ -549,8 +600,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // стрелки поворота у конца полосы по ходу движения, «А» на автобусной полосе
         const tp = l.dir === "forward" ? lp : [...lp].reverse();
         const L = pathLength(tp);
-        if (l.turn) { const p = pointAt(tp, L > 30 ? L - 12 : L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: turnArrows(l.turn) }); }
-        if (l.kind === "bus" && L > 30) { const p = pointAt(tp, L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: "А" }); }
+        if (l.turn) { const p = pointAt(tp, L > 30 ? L - 12 : L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: l.turn }); }
+        if (l.kind === "bus" && L > 30) { const p = pointAt(tp, L / 2); labels.push({ pos: p.pos, angle: p.angle - 90, text: "bus" }); }
       });
       // края проезжей части - сплошные
       solid(offsetPath(path, edges[0] + 0.2));
@@ -673,7 +724,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         new PathLayer({ id: "transit", data: transitData, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.rail && hlSet.has(d.id) ? HL : d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true, pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight] } }),
         // разметка: сплошные линии и штрихи прерывистых
         new PathLayer<{ path: P3[] }>({ id: "lane-lines", data: lanesData?.lines ?? [], getPath: (d) => d.path, getColor: dark ? [205, 210, 215, laneClose ? 210 : 120] : [255, 255, 255, laneClose ? 240 : 150], getWidth: 0.15, widthUnits: "meters", widthMinPixels: laneClose ? 1 : 0.6, updateTriggers: { getColor: [dark, laneClose] } }),
-        new TextLayer<{ pos: P3; angle: number; text: string }>({ id: "lane-labels", data: lanesData?.labels ?? [], getPosition: (d) => d.pos, getText: (d) => d.text, getAngle: (d) => d.angle, getSize: 2.2, sizeUnits: "meters", sizeMinPixels: 6, getColor: dark ? [225, 230, 236, 235] : [255, 255, 255, 250], characterSet: ["↶", "←", "↖", "↑", "↗", "→", "А"], billboard: false, fontWeight: 700, updateTriggers: { getColor: dark } }),
+        new IconLayer<{ pos: P3; angle: number; text: string }>({ id: "lane-labels", data: lanesData?.labels ?? [], getPosition: (d) => d.pos, getIcon: (d) => ({ id: "lane:" + d.text, url: d.text === "bus" ? BUS_LETTER_URL : turnIconUrl(d.text), width: 64, height: 64, mask: true }), getAngle: (d) => d.angle, getSize: 2.6, sizeUnits: "meters", sizeMinPixels: 7, getColor: dark ? [225, 230, 236, 235] : [255, 255, 255, 250], billboard: false, updateTriggers: { getColor: dark } }),
         // «зебра» поперек проезжей части у пешеходных переходов (вблизи)
         // линия перехода под «зеброй»: когда зебра видна, линия почти прозрачная (по ней все равно можно кликнуть)
         new PathLayer({ id: "crossings", data: crossLines, getPath: (d) => d.path, getColor: (d): Rgba => (d.id === selWay?.id ? [31, 111, 209, 255] : hlSet.has(d.id) ? soften(HL, dark) : d.zebra && zebraData.length ? [d.color[0], d.color[1], d.color[2], 3] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id, highlight, zebraData.length > 0] } }),
