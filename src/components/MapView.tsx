@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, addWay, deleteNode, deleteWay, moveNodeDone, setNodeTags, splitWay } from "../model/store";
+import { useEditor, addWay, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, setNodeTags, splitWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, lanesOf, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
 import { TEMPLATES } from "../model/templates";
@@ -136,7 +136,10 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       const st = useEditor.getState();
       if (!st.data) return;
       const t = live.current.tool;
-      const info = pick(e.point.x, e.point.y);
+      // узел под курсором важнее круга ошибки вокруг него: иначе узел разорванного перекрестка не выбрать;
+      // в инструментах правки круги ошибок вообще не перехватывают клики
+      const onNode = pick(e.point.x, e.point.y, ["nodes", "signals"]);
+      const info = onNode?.object ? onNode : t === "select" ? pick(e.point.x, e.point.y) : pick(e.point.x, e.point.y, ["roads"]);
       const layer = info?.layer?.id;
       const obj = info?.object as (RoadItem & Pt & { key: string }) | undefined;
       if (layer === "errors" && obj) {
@@ -152,6 +155,26 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       } else if (t === "draw") {
         const p = nodeId !== null ? st.data.nodes.get(nodeId)! : null;
         setDraw((d) => [...d, p ? { id: p.id, lat: p.lat, lon: p.lon } : { id: null, lat: e.lngLat.lat, lon: e.lngLat.lng }]);
+      } else if (t === "node") {
+        if (nodeId !== null) { st.select({ kind: "node", id: nodeId }); return st.toast("Здесь уже есть узел"); }
+        if (wayId === null) return st.toast("Кликните по линии дороги, туда встанет новый узел");
+        insertNode(wayId, e.lngLat.lat, e.lngLat.lng);
+      } else if (t === "join") {
+        // шаг 1: выбрать узел, который присоединяем; шаг 2: кликнуть узел или дорогу, к которой присоединяем
+        const s = st.selection;
+        const from = s?.kind === "node" ? s.id : null;
+        if (from === null) {
+          if (nodeId === null) return st.toast("Сначала кликните узел, который нужно присоединить (например, конец дороги)");
+          st.select({ kind: "node", id: nodeId });
+          return;
+        }
+        if (nodeId === from) return st.select(null);
+        if (nodeId !== null) joinNodes(from, nodeId);
+        else if (wayId !== null) joinNodeToWay(from, wayId);
+        else st.select(null);
+      } else if (t === "unjoin") {
+        if (nodeId === null) return st.toast("Кликните по узлу, где сходятся дороги");
+        unjoinNode(nodeId);
       } else if (t === "signal") {
         if (nodeId === null) return st.toast("Кликните по узлу дороги (включите масштаб поближе)");
         const n = st.data.nodes.get(nodeId)!;
@@ -311,6 +334,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     draw: "Кликайте точки новой дороги, к узлам прилипает. Enter или двойной клик - готово, Esc - отмена.",
     signal: "Клик по узлу дороги ставит или убирает светофор.",
     split: "Клик по среднему узлу дороги разрезает ее на две.",
+    node: "Клик по линии дороги добавляет на нее новый узел.",
+    join: selection?.kind === "node"
+      ? "Шаг 2 из 2: кликните узел или дорогу, к которой присоединить выбранный узел. Esc - отмена."
+      : "Шаг 1 из 2: кликните узел, который нужно присоединить (например, конец дороги).",
+    unjoin: "Клик по узлу, где сходятся дороги, разъединяет их: у каждой дороги будет свой узел.",
     delete: "Клик по дороге или узлу удаляет его.",
   };
 

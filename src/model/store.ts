@@ -4,10 +4,10 @@ import type { OsmData, OsmNode, OsmWay, Tags } from "../osm/types";
 import { cloneData } from "../osm/types";
 import { validate, type GraphError, type ValidationResult } from "./validate";
 import { DEFAULT_NORMS, type Norms } from "./calc";
-import { makeProjection, project } from "./geo";
+import { distM, makeProjection, project } from "./geo";
 
 export type Selection = { kind: "way"; id: number } | { kind: "node"; id: number } | null;
-export type Tool = "select" | "draw" | "signal" | "split" | "delete";
+export type Tool = "select" | "draw" | "node" | "join" | "unjoin" | "signal" | "split" | "delete";
 
 // Команда правки: умеет сделать и отменить себя
 interface Command {
@@ -233,6 +233,116 @@ function mergeInto(d: OsmData, keep: number, drop: number) {
   const dn = d.nodes.get(drop), kn = d.nodes.get(keep);
   if (dn && kn) kn.tags = { ...dn.tags, ...kn.tags };
   d.nodes.delete(drop);
+}
+
+// Ближайший к точке отрезок дороги: номер второго узла отрезка и точка на нем (в метрах)
+function nearestSegment(d: OsmData, w: OsmWay, lat: number, lon: number) {
+  const pr = makeProjection(lat, lon);
+  const xy = (id: number): [number, number] => { const n = d.nodes.get(id)!; return pr.toXY(n.lat, n.lon); };
+  let best = { idx: -1, dist: Infinity, q: [0, 0] as [number, number], t: 0 };
+  for (let i = 1; i < w.nodeIds.length; i++) {
+    const { q, t, d: dist } = project([0, 0], xy(w.nodeIds[i - 1]), xy(w.nodeIds[i]));
+    if (dist < best.dist) best = { idx: i, dist, q, t };
+  }
+  return { ...best, pr };
+}
+
+// Добавить узел на дорогу в месте клика. Узел встает точно на линию дороги.
+export function insertNode(wayId: number, lat: number, lon: number) {
+  const d = ed().data!;
+  const w = d.ways.get(wayId);
+  if (!w) return;
+  const seg = nearestSegment(d, w, lat, lon);
+  if (seg.idx < 0) return;
+  const [nlat, nlon] = seg.pr.toLatLon(seg.q[0], seg.q[1]);
+  // если клик почти в существующий узел, новый не нужен
+  for (const id of [w.nodeIds[seg.idx - 1], w.nodeIds[seg.idx]]) {
+    const n = d.nodes.get(id)!;
+    if (distM(n.lat, n.lon, nlat, nlon) < 1) { ed().select({ kind: "node", id }); return ed().toast("Здесь уже есть узел"); }
+  }
+  // узел добавляется во все дороги, которые идут по этому же отрезку
+  const a = w.nodeIds[seg.idx - 1], b = w.nodeIds[seg.idx];
+  const sameSeg = [...d.ways.values()].filter((x) => x.nodeIds.some((id, i) => i > 0 && ((x.nodeIds[i - 1] === a && id === b) || (x.nodeIds[i - 1] === b && id === a))));
+  let nid = 0;
+  ed().run("Новый узел на дороге", sameSeg.map((x) => x.id), [], () => {
+    nid = newId();
+    d.nodes.set(nid, { id: nid, lat: nlat, lon: nlon, tags: {}, attrs: {} });
+    for (const x of sameSeg) {
+      for (let i = x.nodeIds.length - 1; i > 0; i--) {
+        const p = x.nodeIds[i - 1], c = x.nodeIds[i];
+        if ((p === a && c === b) || (p === b && c === a)) x.nodeIds.splice(i, 0, nid);
+      }
+    }
+  });
+  ed().select({ kind: "node", id: nid });
+}
+
+// Соединять можно только то, что рядом: защита от случайного клика в другом конце карты
+const JOIN_MAX_M = 50;
+
+// Соединить два узла в один: дороги начинают сходиться в узле to
+export function joinNodes(from: number, to: number) {
+  const d = ed().data!;
+  if (from === to) return;
+  const a = d.nodes.get(from), b = d.nodes.get(to);
+  if (!a || !b) return;
+  const far = distM(a.lat, a.lon, b.lat, b.lon);
+  if (far > JOIN_MAX_M) return ed().toast(`Узлы слишком далеко друг от друга (${Math.round(far)} м). Соединять можно ближе ${JOIN_MAX_M} м`);
+  const ws = [...new Set([...waysWithNode(d, from), ...waysWithNode(d, to)])];
+  ed().run("Соединение узлов", ws, [from, to], () => mergeInto(d, to, from));
+  ed().select(null);
+  ed().toast("Узлы соединены, дороги теперь связаны");
+}
+
+// Соединить узел с дорогой: узел ставится на ближайшую точку дороги и входит в нее
+export function joinNodeToWay(from: number, wayId: number) {
+  const d = ed().data!;
+  const w = d.ways.get(wayId);
+  const n = d.nodes.get(from);
+  if (!w || !n) return;
+  if (w.nodeIds.includes(from)) return ed().toast("Этот узел уже на этой дороге");
+  const seg = nearestSegment(d, w, n.lat, n.lon);
+  if (seg.idx < 0) return;
+  // если ближайшая точка почти совпадает с узлом дороги, просто склеиваем узлы
+  const [plat, plon] = seg.pr.toLatLon(seg.q[0], seg.q[1]);
+  if (seg.dist > JOIN_MAX_M) return ed().toast(`Дорога слишком далеко от узла (${Math.round(seg.dist)} м). Соединять можно ближе ${JOIN_MAX_M} м`);
+  for (const id of [w.nodeIds[seg.idx - 1], w.nodeIds[seg.idx]]) {
+    const m = d.nodes.get(id)!;
+    if (distM(m.lat, m.lon, plat, plon) < 2) return joinNodes(from, id);
+  }
+  ed().run("Соединение узла с дорогой", [...new Set([...waysWithNode(d, from), wayId])], [from], () => {
+    n.lat = plat; n.lon = plon;
+    w.nodeIds.splice(seg.idx, 0, from);
+  });
+  ed().select(null);
+  ed().toast("Узел присоединен к дороге");
+}
+
+// Разъединить: каждая дорога, кроме первой, получает в этом месте свой узел.
+// Новые узлы чуть сдвигаются вдоль своей дороги, чтобы их было видно и можно было взять мышкой.
+export function unjoinNode(nodeId: number) {
+  const d = ed().data!;
+  const n = d.nodes.get(nodeId);
+  if (!n) return;
+  const ws = waysWithNode(d, nodeId);
+  if (ws.length < 2) return ed().toast("В этом узле только одна дорога, разъединять нечего");
+  const pr = makeProjection(n.lat, n.lon);
+  ed().run("Разъединение дорог в узле", ws, [nodeId], () => {
+    for (const wid of ws.slice(1)) {
+      const w = d.ways.get(wid)!;
+      const i = w.nodeIds.indexOf(nodeId);
+      const nb = d.nodes.get(w.nodeIds[i + 1] ?? w.nodeIds[i - 1])!;
+      const [x, y] = pr.toXY(nb.lat, nb.lon);
+      const len = Math.hypot(x, y);
+      const k = len > 0 ? Math.min(3, len * 0.3) / len : 0;
+      const [lat, lon] = pr.toLatLon(x * k, y * k);
+      const id = newId();
+      d.nodes.set(id, { id, lat, lon, tags: {}, attrs: {} });
+      w.nodeIds = w.nodeIds.map((x2) => (x2 === nodeId ? id : x2));
+    }
+  });
+  ed().select({ kind: "node", id: nodeId });
+  ed().toast(`Дороги в узле разъединены: ${ws.length}`);
 }
 
 export function fixError(e: GraphError) {

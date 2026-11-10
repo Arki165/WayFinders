@@ -188,8 +188,26 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .zpill { display: inline-block; padding: 0 7px; border-radius: 999px; color: #fff; font-weight: 600; }
 .chart-box { position: relative; flex: 1; min-height: 0; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
 .chart-box canvas { position: absolute; inset: 0; }
-.norms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; overflow: auto; min-height: 0; }
-.norms .hint { grid-column: 1 / -1; }
+/* вкладка "Формулы" */
+.formulas { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-content: start; }
+.fcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
+.fcard h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.formula { font-family: "Cambria Math", "Times New Roman", Georgia, serif; font-size: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 0 6px; white-space: nowrap; }
+.where { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.where .fv, .fnote .fv { font-family: "Cambria Math", "Times New Roman", Georgia, serif; font-size: 14px; color: var(--fg); }
+.fv i { font-style: italic; }
+.fv sub { font-size: 0.62em; font-style: normal; margin-left: 1px; }
+.frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 2px; }
+.frac > span { padding: 0 4px; line-height: 1.25; }
+.frac > span:first-child { border-bottom: 1.5px solid currentColor; }
+.zones { display: grid; gap: 4px; margin-top: 6px; }
+.zones span { display: flex; align-items: center; gap: 8px; }
+.zones .zpill { min-width: 92px; text-align: center; font-size: 11px; }
+.fnote { grid-column: 1 / -1; }
+/* таблицы нормативов встают в ряд, а если не помещаются - переносятся вниз */
+.norms { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 10px 18px; overflow: auto; min-height: 0; flex: 1; }
+.norms > table { flex: 1 1 200px; max-width: 360px; width: auto; }
+.norms .hint { flex-basis: 100%; }
 
 .cmp { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; padding: 8px 10px; overflow: hidden; }
 /* таблица прокручивается внутри своей колонки, а не налезает на соседнюю */

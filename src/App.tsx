@@ -5,6 +5,7 @@ import ErrorsPanel from "./components/ErrorsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import CalcPanel from "./components/CalcPanel";
 import ComparePanel from "./components/ComparePanel";
+import FormulasPanel from "./components/FormulasPanel";
 import Resizer from "./components/Resizer";
 import { ImportDialog, SaveDialog } from "./components/Dialogs";
 import { useEditor, deleteNode, deleteWay, reverseWay, type Tool } from "./model/store";
@@ -16,6 +17,9 @@ import { VERSION } from "./version";
 const TOOLS: { id: Tool; key: string; label: string; icon: string }[] = [
   { id: "select", key: "V", label: "Выбор и перенос", icon: "↖" },
   { id: "draw", key: "W", label: "Нарисовать дорогу", icon: "✎" },
+  { id: "node", key: "N", label: "Добавить узел на дорогу", icon: "⊕" },
+  { id: "join", key: "J", label: "Соединить: узел с узлом или с дорогой", icon: "🔗" },
+  { id: "unjoin", key: "U", label: "Разъединить дороги в узле", icon: "⛓" },
   { id: "signal", key: "T", label: "Светофор", icon: "🚦" },
   { id: "split", key: "X", label: "Разрезать дорогу", icon: "✂" },
   { id: "delete", key: "D", label: "Удалить", icon: "🗑" },
@@ -34,7 +38,7 @@ export default function App() {
 
   // null - панель скрыта, вместо нее узкая полоска с вкладками
   const [side, setSide] = useState<"props" | "errors" | "history" | null>("props");
-  const [bottom, setBottom] = useState<"calc" | "compare" | null>("calc");
+  const [bottom, setBottom] = useState<"calc" | "compare" | "formulas" | null>("calc");
   // размеры панелей в пикселях, меняются перетаскиванием края
   const [sideWidth, setSideWidth] = useState(360);
   const [bottomHeight, setBottomHeight] = useState(320);
@@ -127,7 +131,7 @@ export default function App() {
       if (k === "escape") { st.getState().select(null); st.getState().setHighlight([]); return setTool("select"); }
       if (k === "3") return setView3d((v) => !v);
       if (k === "h" || k === "р") return setHeat((v) => !v);
-      const map: Record<string, Tool> = { v: "select", м: "select", w: "draw", ц: "draw", t: "signal", е: "signal", x: "split", ч: "split", d: "delete", в: "delete" };
+      const map: Record<string, Tool> = { v: "select", м: "select", w: "draw", ц: "draw", n: "node", т: "node", j: "join", о: "join", u: "unjoin", г: "unjoin", t: "signal", е: "signal", x: "split", ч: "split", d: "delete", в: "delete" };
       if (map[k]) setTool(map[k]);
     };
     window.addEventListener("keydown", onKey);
@@ -210,16 +214,20 @@ export default function App() {
               <div className="tabs">
                 <button className={bottom === "calc" ? "on" : ""} onClick={() => setBottom("calc")}>Расчеты и графики</button>
                 <button className={bottom === "compare" ? "on" : ""} onClick={() => setBottom("compare")}>Сравнение с исходным</button>
+                <button className={bottom === "formulas" ? "on" : ""} onClick={() => setBottom("formulas")}>Формулы</button>
                 <span className="grow" />
                 <button className="hide" onClick={() => setBottom(null)} title="Скрыть панель и отдать место карте">Скрыть ▾</button>
               </div>
-              {bottom === "calc" ? <CalcPanel /> : <ComparePanel />}
+              {bottom === "calc" && <CalcPanel />}
+              {bottom === "compare" && <ComparePanel />}
+              {bottom === "formulas" && <FormulasPanel />}
             </section>
           )}
           {!bottom && data && (
             <div className="bottom-rail" title="Открыть нижнюю панель">
               <button onClick={() => setBottom("calc")}>▴ Расчеты и графики</button>
               <button onClick={() => setBottom("compare")}>▴ Сравнение с исходным</button>
+              <button onClick={() => setBottom("formulas")}>▴ Формулы</button>
             </div>
           )}
         </main>
@@ -256,7 +264,7 @@ export default function App() {
             <span className={crit ? "c-danger" : "c-ok"}>Критичных ошибок: {crit}</span>
             <span>Правок: {past.length}</span>
             <span className="grow" />
-            <span>V выбор · W дорога · T светофор · X разрезать · D удалить · R направление · Del удалить выделенное · 3 2D/3D · H загрузка · Ctrl+Z отмена</span>
+            <span>V выбор · W дорога · N узел · J соединить · U разъединить · T светофор · X разрезать · D удалить · R направление · Del удалить выделенное · 3 2D/3D · H загрузка · Ctrl+Z отмена</span>
           </>
         ) : <span>Откройте файл .osm, пример или загрузите район из OpenStreetMap</span>}
       </footer>

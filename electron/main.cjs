@@ -1,14 +1,18 @@
 // Главный процесс Electron: окно приложения и работа с файлами
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 function createWindow() {
+  // окно не больше свободной части экрана (без панели задач),
+  // иначе на ноутбуке с масштабом 125-150% часть окна уходит за край
+  const area = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1000,
-    minHeight: 650,
+    width: Math.min(1440, area.width),
+    height: Math.min(900, area.height),
+    minWidth: Math.min(1000, area.width),
+    minHeight: Math.min(600, area.height),
+    center: true,
     title: "WayFinders",
     backgroundColor: "#1a1f1c",
     webPreferences: {

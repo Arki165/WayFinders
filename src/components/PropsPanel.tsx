@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useEditor, reverseWay, deleteWay, deleteNode, setNodeTags, setWayTags } from "../model/store";
+import { useEditor, reverseWay, deleteWay, deleteNode, setNodeTags, setWayTags, unjoinNode } from "../model/store";
 import { ROAD_CLASSES, SURFACES, SIGNAL_KEYS, drivableNodeSet, isSignalTagged, lanesOf, maxSpeed, wayName } from "../model/roads";
 import { wayLengthM } from "../model/geo";
 import { TEMPLATES, MODIFIERS } from "../model/templates";
@@ -113,6 +113,7 @@ function WayPanel({ way }: { way: OsmWay }) {
 function NodePanel({ node }: { node: OsmNode }) {
   const data = useEditor((s) => s.data)!;
   const select = useEditor((s) => s.select);
+  const setTool = useEditor((s) => s.setTool);
   const t = node.tags;
   const onRoad = drivableNodeSet(data).has(node.id);
   const ways = [...data.ways.values()].filter((w) => w.nodeIds.includes(node.id) && w.tags.highway);
@@ -171,6 +172,10 @@ function NodePanel({ node }: { node: OsmNode }) {
 
       <h3>Дороги через узел</h3>
       <div className="chips">{ways.map((w) => <button key={w.id} onClick={() => select({ kind: "way", id: w.id })}>{wayName(w)}</button>)}</div>
+      <div className="chips">
+        <button onClick={() => setTool("join")} title="Дальше кликните на карте узел или дорогу, к которой присоединить этот узел">🔗 Соединить с...</button>
+        <button disabled={ways.length < 2} onClick={() => unjoinNode(node.id)} title="У каждой дороги в этом месте будет свой узел">⛓ Разъединить дороги</button>
+      </div>
 
       <TagEditor tags={t} onChange={(tags, label) => setNodeTags(node.id, tags, label)} />
       <div className="chips"><button className="danger" onClick={() => deleteNode(node.id)}>Удалить узел</button></div>
