@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import "./props.css";
 import {
   useEditor, reverseWay, deleteWay, deleteWays, deleteNode, setNodeTags, setWayTags, unjoinNode, patchSelection,
@@ -14,10 +14,11 @@ import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } fro
 import { calcWay } from "../model/calc";
 import { getMapBounds } from "./MapView";
 import type { OsmNode, OsmWay, Tags } from "../osm/types";
+import Icon from "./Icon";
 
 const fmt = (x: number, n = 0) => x.toLocaleString("ru-RU", { minimumFractionDigits: n, maximumFractionDigits: n });
 const SPEEDS = ["20", "30", "40", "50", "60", "70", "80", "90", "110", "RU:urban"];
-const speedText = (v: string) => (v === "RU:urban" ? "городская (60)" : v + " км/ч");
+const speedText = (v: string) => (v === "RU:urban" ? "Городская (60)" : v + " км/ч");
 // значение тега у всех дорог: одинаковое или null, если разные
 const common = (ws: OsmWay[], f: (w: OsmWay) => string) => (ws.every((w) => f(w) === f(ws[0])) ? f(ws[0]) : null);
 
@@ -67,29 +68,29 @@ function RoadFields({ get, set }: Fields) {
       <ClassPicker get={get} set={set} />
       <span>Движение</span>
       <div className="seg">
-        {([["no", "⇄ Обе", "Движение в обе стороны"], ["yes", "→ Туда", "Одностороннее по направлению линии"], ["-1", "← Обратно", "Одностороннее против направления линии"]] as const).map(([v, l, t]) => (
-          <button key={v} className={ow === v ? "on" : ""} title={t} onClick={() => set({ oneway: v }, "Направление")}>{l}</button>
+        {([["no", "twoWay", "Обе", "Движение в обе стороны"], ["yes", "arrowRight", "Туда", "Одностороннее по направлению линии"], ["-1", "arrowLeft", "Обратно", "Одностороннее против направления линии"]] as const).map(([v, ic, l, t]) => (
+          <button key={v} className={ow === v ? "on" : ""} title={t} onClick={() => set({ oneway: v }, "Направление")}><Icon name={ic} size={15} />{l}</button>
         ))}
       </div>
       <span>Полосы</span>
       <div className="step">
-        <button disabled={n === null} onClick={() => set({ lanes: String(Math.max(1, n! - 1)) }, "Полосы", ["lanes:forward", "lanes:backward"])}>−</button>
+        <button disabled={n === null} onClick={() => set({ lanes: String(Math.max(1, n! - 1)) }, "Полосы", ["lanes:forward", "lanes:backward"])} title="Меньше полос"><Icon name="minus" size={14} /></button>
         <b>{n ?? "разные"}</b>
-        <button disabled={n === null} onClick={() => set({ lanes: String(Math.min(8, n! + 1)) }, "Полосы", ["lanes:forward", "lanes:backward"])}>+</button>
-        {n === null && <select value="" onChange={(e) => set({ lanes: e.target.value }, "Полосы", ["lanes:forward", "lanes:backward"])}><option value="">задать всем</option>{[1, 2, 3, 4, 5, 6].map((k) => <option key={k} value={k}>{k}</option>)}</select>}
+        <button disabled={n === null} onClick={() => set({ lanes: String(Math.min(8, n! + 1)) }, "Полосы", ["lanes:forward", "lanes:backward"])} title="Больше полос"><Icon name="plus" size={14} /></button>
+        {n === null && <select value="" onChange={(e) => set({ lanes: e.target.value }, "Полосы", ["lanes:forward", "lanes:backward"])}><option value="">Задать всем</option>{[1, 2, 3, 4, 5, 6].map((k) => <option key={k} value={k}>{k}</option>)}</select>}
         {get((w) => w.tags.lanes ?? "") === "" && <span className="tag-warn">не задано</span>}
       </div>
       <span>Скорость</span>
       <select value={speed ?? "*"} onChange={(e) => set({ maxspeed: e.target.value }, "Скорость")}>
-        {speed === null && <option value="*">разная</option>}
-        <option value="">не задана{defSpeed ? ` (${defSpeed})` : ""}</option>
+        {speed === null && <option value="*">Разная</option>}
+        <option value="">Не задана{defSpeed ? ` (${defSpeed})` : ""}</option>
         {SPEEDS.map((v) => <option key={v} value={v}>{speedText(v)}</option>)}
         {speed && !SPEEDS.includes(speed) && <option value={speed}>{speed}</option>}
       </select>
       <span>Покрытие</span>
       <select value={surface ?? "*"} onChange={(e) => set({ surface: e.target.value }, "Покрытие")}>
-        {surface === null && <option value="*">разное</option>}
-        <option value="">не задано</option>
+        {surface === null && <option value="*">Разное</option>}
+        <option value="">Не задано</option>
         {Object.entries(SURFACES).map(([k, v]) => <option key={k} value={k}>{v.ru} (×{norms.surfaceK[k] ?? v.k})</option>)}
         {surface && !SURFACES[surface] && <option value={surface}>{surfaceName(surface)} (из файла)</option>}
       </select>
@@ -116,7 +117,7 @@ function ClassPicker({ get, set }: Fields) {
   const hw = get((w) => w.tags.highway ?? "");
   const cat = get((w) => w.tags[CATEGORY_KEY] ?? "");
   const catInfo = ROAD_CATEGORIES.find((c) => c.id === cat);
-  const label = hw === null ? "разные классы" : catInfo ? catInfo.ru : ROAD_CLASSES[hw]?.ru ?? hw;
+  const label = hw === null ? "Разные классы" : catInfo ? catInfo.ru : ROAD_CLASSES[hw]?.ru ?? hw;
   const color = hw && ROAD_CLASSES[hw] ? ROAD_CLASSES[hw].color : [200, 200, 200];
   const pick = (patch: Tags, name: string, remove: string[] = []) => { set(patch, "Класс дороги: " + name, remove); setOpen(false); };
   const lanesSet = get((w) => (w.tags.lanes ? "y" : "")) === "y", speedSet = get((w) => (w.tags.maxspeed ? "y" : "")) === "y";
@@ -126,7 +127,7 @@ function ClassPicker({ get, set }: Fields) {
       <button className="cls-cur" onClick={() => setOpen(!open)} title="Выбрать класс дороги">
         <i className="cls-sw" style={{ background: `rgb(${color.join(",")})` }} />
         <span>{label}</span>
-        <small>{open ? "▴" : "▾"}</small>
+        <Icon name={open ? "chevronUp" : "chevronDown"} size={14} className="muted" />
       </button>
       {open && (
         <div className="cls-menu">
@@ -188,8 +189,13 @@ function WayPanel({ way }: { way: OsmWay }) {
   return (
     <div className="pane">
       <div>
-        <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={wayName(way)} onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
-        <div className="sub">дорога {way.id}{way.id < 0 ? " (новая)" : ""} · {way.nodeIds.length} узлов · {fmt(L)} м</div>
+        <Head actions={<>
+          <button className="icon-btn" onClick={() => reverseWay(way.id)} title="Развернуть направление (R)"><Icon name="reverse" size={16} /></button>
+          <button className="icon-btn danger" onClick={() => deleteWay(way.id)} title="Удалить дорогу (Delete)"><Icon name="trash" size={16} /></button>
+        </>}>
+          <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={wayName(way)} title="Название улицы, можно изменить" onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
+        </Head>
+        <div className="sub">Дорога {way.id}{way.id < 0 ? " (новая)" : ""} · {way.nodeIds.length} узлов · {fmt(L)} м</div>
       </div>
 
       <RoadFields get={(f) => f(way)} set={change} />
@@ -209,16 +215,24 @@ function WayPanel({ way }: { way: OsmWay }) {
         {Object.entries(TEMPLATES).filter(([, v]) => !v.kind).map(([k, v]) => <button key={k} onClick={() => change(v.tags, "Шаблон: " + v.name, ["lanes:forward", "lanes:backward", CATEGORY_KEY])}>{v.name}</button>)}
       </div>
       <div className="chips">
-        <button onClick={() => insertBridge(way.id)} title="Участок дороги 50 м над пересечением с другой дорогой (или в середине) становится мостом">🌉 Вставить мост</button>
+        <button onClick={() => insertBridge(way.id)} title="Участок дороги 50 м над пересечением с другой дорогой (или в середине) становится мостом"><Icon name="bridge" size={15} />Вставить мост</button>
         <SaveTemplate ids={[way.id]} />
       </div>
       <p className="hint">Shift+клик по другим дорогам выделяет несколько сразу. Shift+клик по двум узлам выделяет участок между ними.</p>
 
       <div className="chips">
-        <button onClick={() => reverseWay(way.id)}>Развернуть (R)</button>
         <button className={inAnalysis ? "on" : ""} onClick={() => setAnalysis(inAnalysis ? analysis.filter((x) => x !== way.id) : [...analysis, way.id])}>{inAnalysis ? "Убрать из расчета" : "Добавить в расчет"}</button>
-        <button className="danger" onClick={() => deleteWay(way.id)}>Удалить дорогу</button>
       </div>
+    </div>
+  );
+}
+
+// Шапка панели: название выделенного и быстрые действия справа (как в больших редакторах)
+function Head({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="panel-head">
+      <div className="panel-title">{children}</div>
+      {actions && <div className="panel-actions">{actions}</div>}
     </div>
   );
 }
@@ -263,7 +277,12 @@ function OtherPanel({ way }: { way: OsmWay }) {
   return (
     <div className="pane">
       <div>
-        <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={kind} onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
+        <Head actions={<>
+          {!building && <button className="icon-btn" onClick={() => reverseWay(way.id)} title="Развернуть направление (R)"><Icon name="reverse" size={16} /></button>}
+          <button className="icon-btn danger" onClick={() => deleteWay(way.id)} title={(building ? "Удалить здание" : "Удалить") + " (Delete)"}><Icon name="trash" size={16} /></button>
+        </>}>
+          <input className="title-input" defaultValue={t.name ?? ""} key={way.id + (t.name ?? "")} placeholder={kind} title="Название, можно изменить" onBlur={(e) => e.target.value !== (t.name ?? "") && change({ name: e.target.value }, "Название")} />
+        </Head>
         <div className="sub">{kind} · {way.nodeIds.length} узлов · {building ? `площадь ${fmt(areaM2(data, way))} м²` : `${fmt(wayLengthM(data, way))} м`}</div>
       </div>
       {building && (
@@ -273,21 +292,19 @@ function OtherPanel({ way }: { way: OsmWay }) {
           <span>около {fmt((parseFloat(t["building:levels"] ?? "") || 3) * 3)} м (3 м на этаж), так здание видно в 3D</span>
         </div>
       )}
-      {building && <p className="hint">Новое здание: инструмент «Нарисовать» (W), шаблон «Здание», кликайте углы, Enter - готово. Удалить: кнопка ниже, Delete или инструмент D.</p>}
+      {building && <p className="hint">Новое здание: инструмент «Нарисовать» (W), шаблон «Здание», кликайте углы, Enter - готово. Удалить: корзина вверху панели, Delete или инструмент D.</p>}
       {isTrack(way) && (
         <div className="form">
           <span>Вид</span>
           <div className="seg">
             {(["tram", "rail"] as const).map((k) => <button key={k} className={t.railway === k ? "on" : ""} onClick={() => change({ railway: k }, "Вид путей")} title={TRACKS[k]}>{k === "tram" ? "Трамвай" : "Ж/д"}</button>)}
           </div>
-          {t.embedded === "yes" && <><span>Где</span><span>по проезжей части дороги</span></>}
+          {t.embedded === "yes" && <><span>Где</span><span>По проезжей части дороги</span></>}
         </div>
       )}
       {isTrack(way) && <p className="hint">Рельсы рисуются инструментом «Нарисовать дорогу» (W) с шаблоном путей. Концы ближе 15 м к другим путям стыкуются сами, на пересечении с дорогой ставится переезд.</p>}
       <div className="chips">
-        {!building && <button onClick={() => reverseWay(way.id)}>Развернуть (R)</button>}
         <SaveTemplate ids={[way.id]} />
-        <button className="danger" onClick={() => deleteWay(way.id)}>{building ? "Удалить здание" : "Удалить"}</button>
       </div>
     </div>
   );
@@ -307,7 +324,7 @@ function areaM2(data: { nodes: Map<number, OsmNode> }, w: OsmWay): number {
 }
 
 // ---------- узел ----------
-const SIDE_NOM: Record<string, string> = { N: "север", NE: "северо-восток", E: "восток", SE: "юго-восток", S: "юг", SW: "юго-запад", W: "запад", NW: "северо-запад" };
+const SIDE_NOM: Record<string, string> = { N: "Север", NE: "Северо-восток", E: "Восток", SE: "Юго-восток", S: "Юг", SW: "Юго-запад", W: "Запад", NW: "Северо-запад" };
 const SIDE_ADJ: Record<string, string> = { N: "северной", NE: "северо-восточной", E: "восточной", SE: "юго-восточной", S: "южной", SW: "юго-западной", W: "западной", NW: "северо-западной" };
 
 function NodePanel({ node }: { node: OsmNode }) {
@@ -326,8 +343,10 @@ function NodePanel({ node }: { node: OsmNode }) {
   return (
     <div className="pane">
       <div>
-        <div className="title-input">{roads.length >= 3 ? `Перекресток, ${roads.length} дорог` : roads.length === 2 ? "Стык двух дорог" : roads.length === 1 ? (isEnd ? "Конец дороги" : "Узел дороги") : "Отдельная точка"}</div>
-        <div className="sub">узел {node.id} · {node.lat.toFixed(6)}, {node.lon.toFixed(6)}</div>
+        <Head actions={<button className="icon-btn danger" onClick={() => deleteNode(node.id)} title="Удалить узел (Delete)"><Icon name="trash" size={16} /></button>}>
+          <div className="title-input">{roads.length >= 3 ? `Перекресток, ${roads.length} дорог` : roads.length === 2 ? "Стык двух дорог" : roads.length === 1 ? (isEnd ? "Конец дороги" : "Узел дороги") : "Отдельная точка"}</div>
+        </Head>
+        <div className="sub">Узел {node.id} · {node.lat.toFixed(6)}, {node.lon.toFixed(6)}</div>
       </div>
 
       <div className="switch">
@@ -349,10 +368,10 @@ function NodePanel({ node }: { node: OsmNode }) {
         <>
           <h3>Вставить шаблон</h3>
           <div className="chips">
-            <button onClick={() => makeRoundabout(node.id)} title="Перекресток заменяется кольцом радиусом 18 м, дороги подключаются к нему">⭮ Круговое движение</button>
-            <button onClick={() => makeUturn(node.id)} title={isEnd ? "Петля для разворота на конце дороги" : "Петля для разворота справа от дороги"}>↶ Разворот 180°</button>
-            <button disabled={!isEnd} onClick={() => makeTurn(node.id, "left")} title={isEnd ? "Продолжить дорогу поворотом налево" : "Только на конце дороги"}>↰ Поворот 90°</button>
-            <button disabled={!isEnd} onClick={() => makeTurn(node.id, "right")} title={isEnd ? "Продолжить дорогу поворотом направо" : "Только на конце дороги"}>↱ Поворот 90°</button>
+            <button onClick={() => makeRoundabout(node.id)} title="Перекресток заменяется кольцом радиусом 18 м, дороги подключаются к нему"><Icon name="roundabout" size={15} />Круговое движение</button>
+            <button onClick={() => makeUturn(node.id)} title={isEnd ? "Петля для разворота на конце дороги" : "Петля для разворота справа от дороги"}><Icon name="uturn" size={15} />Разворот 180°</button>
+            <button disabled={!isEnd} onClick={() => makeTurn(node.id, "left")} title={isEnd ? "Продолжить дорогу поворотом налево" : "Только на конце дороги"}><Icon name="turnLeft" size={15} />Поворот 90°</button>
+            <button disabled={!isEnd} onClick={() => makeTurn(node.id, "right")} title={isEnd ? "Продолжить дорогу поворотом направо" : "Только на конце дороги"}><Icon name="turnRight" size={15} />Поворот 90°</button>
           </div>
         </>
       )}
@@ -360,11 +379,10 @@ function NodePanel({ node }: { node: OsmNode }) {
       <h3>Дороги через узел</h3>
       <div className="chips">{ways.map((w) => <button key={w.id} onClick={() => select({ kind: "way", id: w.id })}>{wayName(w)}</button>)}</div>
       <div className="chips">
-        <button onClick={() => setTool("join")} title="Дальше кликните на карте узел или дорогу, к которой присоединить этот узел">🔗 Соединить с...</button>
-        <button disabled={ways.length < 2} onClick={() => unjoinNode(node.id)} title="У каждой дороги в этом месте будет свой узел">⛓ Разъединить дороги</button>
+        <button onClick={() => setTool("join")} title="Дальше кликните на карте узел или дорогу, к которой присоединить этот узел"><Icon name="join" size={15} />Соединить с...</button>
+        <button disabled={ways.length < 2} onClick={() => unjoinNode(node.id)} title="У каждой дороги в этом месте будет свой узел"><Icon name="unjoin" size={15} />Разъединить дороги</button>
       </div>
       <p className="hint">Shift+клик по другому узлу выделит участок дороги между ними.</p>
-      <div className="chips"><button className="danger" onClick={() => deleteNode(node.id)}>Удалить узел</button></div>
     </div>
   );
 }
@@ -497,7 +515,7 @@ function CrossingBox({ node, arms, isSignal }: { node: OsmNode; arms: Arm[]; isS
         <div className="cross-info">
           <p className="hint">Переход через «{wayName(road)}», {fromTo}.</p>
           <div className="chips">
-            <button onClick={() => flipCrossing(node.id)}>⇅ Поменять откуда и куда</button>
+            <button onClick={() => flipCrossing(node.id)}><Icon name="swap" size={15} />Поменять откуда и куда</button>
             <button className={signals ? "on" : ""} onClick={() => setCrossing(node.id, null, !signals)}>{signals ? "Регулируемый" : "Нерегулируемый"}</button>
           </div>
         </div>
@@ -530,7 +548,7 @@ function NumField({ label, value, onSave }: { label: string; value: string; onSa
 function SaveTemplate({ ids }: { ids: number[] }) {
   const [name, setName] = useState<string | null>(null);
   const toast = useEditor((s) => s.toast);
-  if (name === null) return <button onClick={() => setName("")} title="Запомнить эти дороги как шаблон и вставлять их в другие места">⭳ Сохранить как шаблон</button>;
+  if (name === null) return <button onClick={() => setName("")} title="Запомнить эти дороги как шаблон и вставлять их в другие места"><Icon name="bookmark" size={15} />Сохранить как шаблон</button>;
   const save = () => {
     const n = name.trim() || "Мой шаблон";
     const tpl = templateFromWays(ids, n);
@@ -575,13 +593,13 @@ function LibraryPanel() {
           <div className="chips">
             <button onClick={() => insertHere(tpl)}>Вставить</button>
             <button onClick={() => setEdit(tpl)}>Точки</button>
-            <button className="x" title="Удалить шаблон" onClick={() => update(list.filter((x) => x.id !== tpl.id))}>×</button>
+            <button className="x" title="Удалить шаблон" onClick={() => update(list.filter((x) => x.id !== tpl.id))}><Icon name="close" size={14} /></button>
           </div>
         </div>
       ))}
       {!list.length && <p className="hint">Своих шаблонов пока нет.</p>}
       <div className="chips">
-        <button onClick={() => setEdit({ id: Date.now().toString(36), name: "Новый шаблон", lines: [{ tags: { highway: "secondary", lanes: "2", maxspeed: "60" }, pts: [[-30, 0], [30, 0]] }] })}>+ Новый шаблон по точкам</button>
+        <button onClick={() => setEdit({ id: Date.now().toString(36), name: "Новый шаблон", lines: [{ tags: { highway: "secondary", lanes: "2", maxspeed: "60" }, pts: [[-30, 0], [30, 0]] }] })}><Icon name="plus" size={15} />Новый шаблон по точкам</button>
       </div>
     </div>
   );
@@ -626,8 +644,8 @@ function TemplateEditor({ tpl, onSave, onCancel }: { tpl: CustomTemplate; onSave
             <select value={kindOf(l.tags)} onChange={(e) => { const [k, v] = e.target.value.split("="); setLine(i, (x) => { if (k === "railway") x.tags = { railway: v }; else { x.tags = { ...x.tags, highway: v }; delete x.tags.railway; } }); }}>
               {kinds.map(([v, ru]) => <option key={v} value={v}>{ru}</option>)}
             </select>
-            <label className="hint"><input type="checkbox" checked={!!l.closed} onChange={(e) => setLine(i, (x) => { x.closed = e.target.checked; })} /> замкнутая</label>
-            <button className="x" title="Удалить линию" onClick={() => setT({ ...t, lines: t.lines.filter((_, j) => j !== i) })}>×</button>
+            <label className="hint"><input type="checkbox" checked={!!l.closed} onChange={(e) => setLine(i, (x) => { x.closed = e.target.checked; })} /> Замкнутая</label>
+            <button className="x" title="Удалить линию" onClick={() => setT({ ...t, lines: t.lines.filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>
           </div>
           <table className="pts">
             <tbody>
@@ -635,16 +653,16 @@ function TemplateEditor({ tpl, onSave, onCancel }: { tpl: CustomTemplate; onSave
                 <tr key={j}>
                   <td>{j + 1}</td>
                   {[0, 1].map((c) => <td key={c}><input type="number" step="1" value={p[c]} onChange={(e) => setLine(i, (x) => { x.pts[j][c] = Number(e.target.value) || 0; })} /></td>)}
-                  <td><button className="x" title="Удалить точку" disabled={l.pts.length <= 2} onClick={() => setLine(i, (x) => { x.pts.splice(j, 1); })}>×</button></td>
+                  <td><button className="x" title="Удалить точку" disabled={l.pts.length <= 2} onClick={() => setLine(i, (x) => { x.pts.splice(j, 1); })}><Icon name="close" size={14} /></button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="chips"><button onClick={() => setLine(i, (x) => { const last = x.pts[x.pts.length - 1]; x.pts.push([last[0] + 20, last[1]]); })}>+ точка</button></div>
+          <div className="chips"><button onClick={() => setLine(i, (x) => { const last = x.pts[x.pts.length - 1]; x.pts.push([last[0] + 20, last[1]]); })}><Icon name="plus" size={14} />Точка</button></div>
         </div>
       ))}
       <div className="chips">
-        <button onClick={() => setT({ ...t, lines: [...t.lines, { tags: { highway: "residential" }, pts: [[0, 0], [0, 30]] }] })}>+ линия</button>
+        <button onClick={() => setT({ ...t, lines: [...t.lines, { tags: { highway: "residential" }, pts: [[0, 0], [0, 30]] }] })}><Icon name="plus" size={14} />Линия</button>
       </div>
       <p className="hint">Одинаковые точки разных линий при вставке становятся общим узлом, так линии связаны между собой.</p>
       <div className="chips">

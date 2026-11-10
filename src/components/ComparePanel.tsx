@@ -3,6 +3,7 @@ import { useEditor } from "../model/store";
 import { diffData, summary } from "../model/diff";
 import { validate } from "../model/validate";
 import { toCsv, saveCsv } from "../model/exporting";
+import Icon from "./Icon";
 
 export default function ComparePanel() {
   const data = useEditor((s) => s.data);
@@ -62,7 +63,7 @@ export default function ComparePanel() {
       <div className="cmp-list">
         <div className="chips">
           <span className="hint">Дорог: +{d.ways.filter((w) => w.kind === "added").length} / изменено {d.ways.filter((w) => w.kind === "changed").length} / −{d.ways.filter((w) => w.kind === "deleted").length} · узлов перенесено {d.nodesMoved}, добавлено {d.nodesAdded}, удалено {d.nodesDeleted}, изменены теги у {d.nodeTagsChanged}</span>
-          <button onClick={exportCsv}>Скачать сравнение CSV</button>
+          <button onClick={exportCsv}><Icon name="download" size={14} />Сравнение CSV</button>
         </div>
         <table className="tbl">
           <tbody>

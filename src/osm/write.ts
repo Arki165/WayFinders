@@ -44,7 +44,7 @@ export function writeOsm(data: OsmData): string {
 
   const parts: string[] = [];
   parts.push('<?xml version="1.0" encoding="UTF-8"?>\n');
-  parts.push(`<osm version="0.6" generator="WayFinders"${data.header.copyright ? ` copyright="${esc(data.header.copyright)}"` : ""}>\n`);
+  parts.push(`<osm version="0.6" generator="Wayfinder"${data.header.copyright ? ` copyright="${esc(data.header.copyright)}"` : ""}>\n`);
   if (data.bounds) {
     const b = data.bounds;
     parts.push(`  <bounds minlat="${b.minlat}" minlon="${b.minlon}" maxlat="${b.maxlat}" maxlon="${b.maxlon}"/>\n`);

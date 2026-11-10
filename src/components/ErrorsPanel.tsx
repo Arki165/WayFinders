@@ -59,7 +59,7 @@ export default function ErrorsPanel() {
         {(["danger", "warn", "info"] as const).map((s) => (
           <button key={s} className={filter === s ? "on" : ""} onClick={() => setFilter(filter === s ? "all" : s)}>
             <b className={"c-" + s}>{count[s]}</b>
-            <small>{s === "danger" ? "критичные" : s === "warn" ? "предупреждения" : "подсказки"}</small>
+            <small>{s === "danger" ? "Критичные" : s === "warn" ? "Предупреждения" : "Подсказки"}</small>
           </button>
         ))}
       </div>

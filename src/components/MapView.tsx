@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 // Фоновый поток MapLibre собираем отдельным файлом, иначе в Electron из файла он не грузится
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
-import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { useEditor, addWay, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, lanesOf, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS } from "../model/calc";
@@ -17,11 +17,11 @@ export type Basemap = "map" | "satellite";
 // Цвета подложки. В темной теме светлую схему переворачиваем по яркости, но не до черного,
 // а в мягкий сине-серый; вода остается синей. В светлой подложка слегка приглушена, но не обесцвечена:
 // здания на ней отличаются от земли оттенком, без цвета они пропадают.
-const bgColor = (dark: boolean) => (dark ? "#1a2027" : "#e8e9e4");
+const bgColor = (dark: boolean) => (dark ? "#1a2027" : "#e9ebee");
 function mapPaint(dark: boolean) {
   return dark
     ? { "raster-opacity": 0.85, "raster-saturation": -0.55, "raster-hue-rotate": 180, "raster-brightness-min": 0.8, "raster-brightness-max": 0.16 }
-    : { "raster-opacity": 0.75, "raster-saturation": -0.15, "raster-hue-rotate": 0, "raster-brightness-min": 0, "raster-brightness-max": 1 };
+    : { "raster-opacity": 0.8, "raster-saturation": -0.45, "raster-hue-rotate": 0, "raster-brightness-min": 0.06, "raster-brightness-max": 1 };
 }
 
 // карта сразу создается в цветах текущей темы
@@ -68,12 +68,42 @@ maplibregl.addProtocol("esri", async (params, abort) => {
   throw new Error("Нет плитки подложки");
 });
 
+// Стрелка направления у односторонних дорог: SVG-картинка, цвет задается слоем (mask)
+const ARROW_ICON = {
+  url: "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><path d="M6 4.5L19.5 12 6 19.5l3.2-7.5z" fill="#fff"/></svg>'),
+  width: 32, height: 32, mask: true,
+};
+
 // Перетаскивание узла: с какого приближения можно и через сколько пикселей начинается
 const DRAG_MIN_ZOOM = 14;
 const DRAG_START_PX = 4;
 
 // Видимая область карты [юг, запад, север, восток] для загрузки района из OSM
 let currentMap: maplibregl.Map | null = null;
+// Кнопка «Весь граф» в столбике кнопок карты (под приближением и компасом): показывает граф целиком
+class FitAllControl implements maplibregl.IControl {
+  private box: HTMLDivElement | null = null;
+  onAdd() {
+    const box = document.createElement("div");
+    box.className = "maplibregl-ctrl maplibregl-ctrl-group";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fit-all";
+    btn.title = "Показать весь граф";
+    btn.setAttribute("aria-label", "Показать весь граф");
+    // та же иконка, что fitAll в Icon.tsx
+    btn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+    btn.onclick = () => {
+      const b = useEditor.getState().data?.bounds;
+      if (b && currentMap) currentMap.fitBounds([[b.minlon, b.minlat], [b.maxlon, b.maxlat]], { padding: 30, duration: 600 });
+    };
+    box.appendChild(btn);
+    this.box = box;
+    return box;
+  }
+  onRemove() { this.box?.remove(); }
+}
+
 export function getMapBounds(): [number, number, number, number] | null {
   if (!currentMap) return null;
   const b = currentMap.getBounds();
@@ -124,9 +154,10 @@ interface Props {
   showChanges: boolean;
   drawTemplate: string;
   dark: boolean;
+  children?: ReactNode; // панель над картой под подсказкой (например, выбор шаблона новой дороги)
 }
 
-export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, dark }: Props) {
+export default function MapView({ basemap, view3d, heat, showBuildings, showChanges, drawTemplate, dark, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -158,6 +189,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const ro = new ResizeObserver(() => { map.resize(); map.redraw(); });
     ro.observe(box.current);
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new FitAllControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     map.addControl(overlay);
@@ -432,7 +464,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         // полосы общественного транспорта: ширина в метрах, но не тоньше 3 пикселей, чтобы было видно издалека
         new PathLayer({ id: "transit", data: layersData.transit, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: (d) => d.width, widthUnits: "meters", widthMinPixels: 3, capRounded: true, jointRounded: true, pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
         new PathLayer({ id: "crossings", data: layersData.crossings, getPath: (d) => d.path, getColor: (d) => (d.id === selWay?.id ? [31, 111, 209, 255] : soften(d.color, dark)), getWidth: 3, widthUnits: "pixels", pickable: true, updateTriggers: { getColor: [dark, selWay?.id] } }),
-        new TextLayer({ id: "arrows", data: zoom >= 16 ? layersData.arrows : [], getPosition: (d) => d.pos, getText: () => "▶", getAngle: (d) => d.angle, getSize: 11, getColor: dark ? [225, 230, 236, 220] : [40, 40, 40, 220], characterSet: ["▶"], billboard: false }),
+        new IconLayer({ id: "arrows", data: zoom >= 16 ? layersData.arrows : [], getPosition: (d) => d.pos, getIcon: () => ARROW_ICON, getAngle: (d) => d.angle, getSize: 12, sizeUnits: "pixels", getColor: dark ? [225, 230, 236, 230] : [40, 44, 50, 220], billboard: false }),
     ].map((l) => l.clone({ parameters: flat }));
     const pointLayers = [
         new ScatterplotLayer<Pt>({ id: "nodes", data: nodes, getPosition: (d) => d.pos, getRadius: (d) => (d.id === selNode ? 6 : 3.5), radiusUnits: "pixels", getFillColor: (d) => (d.id === selNode ? [31, 111, 209, 255] : [255, 255, 255, 255]), getLineColor: [31, 111, 209, 255], stroked: true, lineWidthMinPixels: 1.5, pickable: true, updateTriggers: { getRadius: selNode, getFillColor: selNode } }),
@@ -465,7 +497,11 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   return (
     <div className="mapwrap">
       <div ref={box} className="map" />
-      {data && <div className="maphint">{hint[tool]}</div>}
+      {/* подсказка инструмента и панели под ней стоят столбиком и не налезают друг на друга */}
+      {data && <div className="map-top">
+        <div className="maphint">{hint[tool]}</div>
+        {children}
+      </div>}
       {data && showChanges && (
         <div className="legend">
           {changes.length === 0 ? "Правок пока нет" : (["added", "changed", "deleted"] as ChangeKind[]).map((k) => (

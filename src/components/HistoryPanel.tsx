@@ -1,5 +1,6 @@
 import { useEditor } from "../model/store";
 import { toCsv, saveCsv } from "../model/exporting";
+import Icon from "./Icon";
 
 export default function HistoryPanel() {
   const log = useEditor((s) => s.log);
@@ -17,9 +18,9 @@ export default function HistoryPanel() {
   return (
     <div className="pane">
       <div className="chips">
-        <button onClick={undo} disabled={!past.length}>↶ Отменить</button>
-        <button onClick={redo} disabled={!future.length}>↷ Повторить</button>
-        <button onClick={exportLog} disabled={!log.length}>Скачать CSV</button>
+        <button onClick={undo} disabled={!past.length}><Icon name="undo" size={15} />Отменить</button>
+        <button onClick={redo} disabled={!future.length}><Icon name="redo" size={15} />Повторить</button>
+        <button onClick={exportLog} disabled={!log.length}><Icon name="download" size={14} />CSV</button>
       </div>
       <p className="hint">Действий в истории: {past.length}. Можно отменить: Ctrl+Z, повторить: Ctrl+Y.</p>
       <div className="hist">

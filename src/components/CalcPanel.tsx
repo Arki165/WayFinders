@@ -4,6 +4,7 @@ import { useEditor, setWayTags } from "../model/store";
 import { calcWay, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
 import { saveCsv, savePng, toCsv } from "../model/exporting";
+import Icon from "./Icon";
 
 Chart.register(...registerables);
 
@@ -21,6 +22,13 @@ export default function CalcPanel() {
   const fileName = useEditor((s) => s.fileName);
   const [kind, setKind] = useState<ChartKind>("z");
   const [showNorms, setShowNorms] = useState(false);
+  // график рисуется в цветах темы: следим за переключением светлой и темной
+  const [theme, setTheme] = useState(document.documentElement.dataset.theme);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setTheme(document.documentElement.dataset.theme));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
   const canvas = useRef<HTMLCanvasElement>(null);
   const chart = useRef<Chart | null>(null);
 
@@ -46,6 +54,10 @@ export default function CalcPanel() {
               { label: "V своб, км/ч", data: rows.map((r) => +r.c.Vfree.toFixed(1)), backgroundColor: "rgba(31,111,209,.85)" },
               { label: "V ср, км/ч", data: rows.map((r) => (r.c.Vavg === null ? 0 : +r.c.Vavg.toFixed(1))), backgroundColor: "rgba(229,154,40,.85)" },
             ];
+    // цвета берутся из CSS-переменных темы (index.css)
+    const css = getComputedStyle(document.documentElement);
+    const fg = css.getPropertyValue("--fg").trim(), muted = css.getPropertyValue("--muted").trim();
+    const grid = css.getPropertyValue("--line").trim(), bg = css.getPropertyValue("--panel").trim();
     chart.current = new Chart(canvas.current, {
       type: "bar",
       data: { labels, datasets },
@@ -54,14 +66,14 @@ export default function CalcPanel() {
         maintainAspectRatio: false,
         animation: false,
         plugins: {
-          legend: { position: "bottom" },
-          title: { display: true, text: kind === "z" ? `Загрузка участков (пороги: ${norms.z1} / ${norms.z2} / ${norms.z3})` : kind === "time" ? "Время проезда: свободное и фактическое" : "Скорость: свободная и средняя" },
+          legend: { position: "bottom", labels: { color: fg, boxWidth: 12 } },
+          title: { display: true, color: fg, font: { weight: 600 }, text: kind === "z" ? `Загрузка участков (пороги: ${norms.z1} / ${norms.z2} / ${norms.z3})` : kind === "time" ? "Время проезда: свободное и фактическое" : "Скорость: свободная и средняя" },
         },
-        scales: { y: { beginAtZero: true } },
+        scales: { x: { ticks: { color: muted }, grid: { color: grid } }, y: { beginAtZero: true, ticks: { color: muted }, grid: { color: grid } } },
       },
-      plugins: [{ id: "white-bg", beforeDraw: (c) => { const ctx = c.ctx; ctx.save(); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.restore(); } }],
+      plugins: [{ id: "bg", beforeDraw: (c) => { const ctx = c.ctx; ctx.save(); ctx.fillStyle = bg; ctx.fillRect(0, 0, c.width, c.height); ctx.restore(); } }],
     });
-  }, [kind, version, norms, analysis.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, version, norms, analysis.join(), theme]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => chart.current?.destroy(), []);
 
   if (!data) return <p className="hint pad">Откройте файл .osm</p>;
@@ -87,10 +99,10 @@ export default function CalcPanel() {
     <div className="calc">
       <div className="calc-left">
         <div className="chips">
-          {selWay && isDrivable(selWay) && !analysis.includes(selWay.id) && <button className="on" onClick={() => setAnalysis([...analysis, selWay.id])}>+ Выделенная: {wayName(selWay)}</button>}
-          <button onClick={addMajor}>+ Все крупные улицы</button>
+          {selWay && isDrivable(selWay) && !analysis.includes(selWay.id) && <button className="on" onClick={() => setAnalysis([...analysis, selWay.id])}><Icon name="plus" size={14} />Выделенная: {wayName(selWay)}</button>}
+          <button onClick={addMajor}><Icon name="plus" size={14} />Все крупные улицы</button>
           {rows.length > 0 && <button onClick={() => setAnalysis([])}>Очистить</button>}
-          <button onClick={exportCsv} disabled={!rows.length}>Скачать CSV</button>
+          <button onClick={exportCsv} disabled={!rows.length}><Icon name="download" size={14} />CSV</button>
           <button className={showNorms ? "on" : ""} onClick={() => setShowNorms(!showNorms)}>Нормативы</button>
         </div>
         {showNorms ? <NormsEditor /> : (
@@ -107,14 +119,14 @@ export default function CalcPanel() {
                     <td className="r" title={`${c.Vmax} × ${c.kSurface}`}>{fmt(c.Vfree, 1)}</td>
                     <td className="r"><b>{fmt(c.Tfree, 2)}</b></td>
                     <td className="r">{fmt(c.P)}</td>
-                    <td className="r"><input defaultValue={c.N ?? ""} key={"n" + id + c.N} placeholder="замер" onBlur={(e) => e.target.value !== String(c.N ?? "") && setMeasure(id, MEASURE_KEYS.volume, e.target.value)} /></td>
-                    <td className="r"><input defaultValue={c.Tfact ?? ""} key={"t" + id + c.Tfact} placeholder="замер" onBlur={(e) => e.target.value !== String(c.Tfact ?? "") && setMeasure(id, MEASURE_KEYS.time, e.target.value)} /></td>
+                    <td className="r"><input defaultValue={c.N ?? ""} key={"n" + id + c.N} placeholder="Замер" onBlur={(e) => e.target.value !== String(c.N ?? "") && setMeasure(id, MEASURE_KEYS.volume, e.target.value)} /></td>
+                    <td className="r"><input defaultValue={c.Tfact ?? ""} key={"t" + id + c.Tfact} placeholder="Замер" onBlur={(e) => e.target.value !== String(c.Tfact ?? "") && setMeasure(id, MEASURE_KEYS.time, e.target.value)} /></td>
                     <td className="r">{c.Z === null ? "-" : <span className="zpill" style={{ background: `rgb(${Z_COLORS[zLevel(c.Z, norms)].join(",")})` }}>{fmt(c.Z, 2)}</span>}</td>
                     <td className="r">{fmt(c.Vavg, 1)}</td>
                     <td className="r">{fmt(c.q, 0)}</td>
                     <td className="r">{fmt(c.Tdelay, 2)}</td>
                     <td className="r">{fmt(c.D, 0)}</td>
-                    <td><button className="x" title="Убрать" onClick={() => setAnalysis(analysis.filter((x) => x !== id))}>×</button></td>
+                    <td><button className="x" title="Убрать" onClick={() => setAnalysis(analysis.filter((x) => x !== id))}><Icon name="close" size={14} /></button></td>
                   </tr>
                 ))}
                 {!rows.length && <tr><td colSpan={13} className="muted">Добавьте участки: выделите дорогу и нажмите «+ Выделенная» или добавьте все крупные улицы.</td></tr>}
@@ -129,7 +141,7 @@ export default function CalcPanel() {
           <div className="seg">
             {([["z", "Загрузка Z"], ["time", "Время"], ["speed", "Скорость"]] as const).map(([k, l]) => <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>)}
           </div>
-          <button disabled={!rows.length} onClick={() => canvas.current && savePng(fileName.replace(/\.osm$/i, "") + `_${kind}.png`, canvas.current)}>Скачать PNG</button>
+          <button disabled={!rows.length} onClick={() => canvas.current && savePng(fileName.replace(/\.osm$/i, "") + `_${kind}.png`, canvas.current)}><Icon name="download" size={14} />PNG</button>
         </div>
         <div className="chart-box"><canvas ref={canvas} />{!rows.length && <p className="hint center">Здесь будет график по участкам из таблицы</p>}</div>
       </div>

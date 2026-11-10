@@ -4,6 +4,7 @@ import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
 import type { OsmData } from "../osm/types";
 import { saveOsmText } from "../model/exporting";
+import Icon from "./Icon";
 
 // ---------- загрузка района из OpenStreetMap (Overpass API) ----------
 // Серверы Overpass по порядку: если первый перегружен или недоступен, пробуем следующий.
@@ -36,7 +37,7 @@ async function overpass(q: string, signal: AbortSignal, onWait?: (msg: string) =
     const fails = await overpassRound(q, signal);
     if (typeof fails === "string") return fails; // это ответ сервера
     const why = fails.join(", ");
-    if (why.includes("406")) throw new Error(`Серверы Overpass отклонили запрос (${why}). Запускайте загрузку из программы WayFinders, а не из браузера.`);
+    if (why.includes("406")) throw new Error(`Серверы Overpass отклонили запрос (${why}). Запускайте загрузку из программы Wayfinder, а не из браузера.`);
     if (round >= RETRY_WAIT_S.length) throw new Error(`Серверы Overpass сейчас перегружены (${why}). Попробуйте через минуту или загрузите меньшую область.`);
     onWait?.(`Серверы Overpass перегружены (${why}), жду ${RETRY_WAIT_S[round]} с и пробую снова (попытка ${round + 2} из ${RETRY_WAIT_S.length + 1})...`);
     await pause(RETRY_WAIT_S[round], signal);
@@ -352,11 +353,11 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
       <div className="dialog">
         <h2>Сохранение графа в .osm</h2>
         <div className="checks">
-          <div><span className={"ico " + (crit ? "bad" : "ok")}>{crit ? "✕" : "✓"}</span>{crit ? `Критичных ошибок: ${crit}. Машины будут телепортироваться или стоять.` : "Критичных ошибок нет"}</div>
-          <div><span className={"ico " + (warn ? "warn" : "ok")}>{warn ? "!" : "✓"}</span>{warn ? `Предупреждений: ${warn}` : "Предупреждений нет"}</div>
-          <div><span className={"ico " + (pct >= 95 ? "ok" : "warn")}>{pct >= 95 ? "✓" : "!"}</span>Связность по направлениям: {pct.toFixed(1)}% узлов{pct >= 95 ? "" : ", цель 95%"}</div>
-          <div><span className="ico ok">✓</span>{newCount ? `${newCount} новых элементов получат положительные id` : "Новых элементов нет"}</div>
-          <div><span className="ico ok">✓</span>Здания, остановки, маршруты и запреты поворотов сохранятся без изменений</div>
+          <div><span className={"ico " + (crit ? "bad" : "ok")}><Icon name={crit ? "close" : "check"} size={13} /></span>{crit ? `Критичных ошибок: ${crit}. Машины будут телепортироваться или стоять.` : "Критичных ошибок нет"}</div>
+          <div><span className={"ico " + (warn ? "warn" : "ok")}><Icon name={warn ? "alert" : "check"} size={13} /></span>{warn ? `Предупреждений: ${warn}` : "Предупреждений нет"}</div>
+          <div><span className={"ico " + (pct >= 95 ? "ok" : "warn")}><Icon name={pct >= 95 ? "check" : "alert"} size={13} /></span>Связность по направлениям: {pct.toFixed(1)}% узлов{pct >= 95 ? "" : ", цель 95%"}</div>
+          <div><span className="ico ok"><Icon name="check" size={13} /></span>{newCount ? `${newCount} новых элементов получат положительные id` : "Новых элементов нет"}</div>
+          <div><span className="ico ok"><Icon name="check" size={13} /></span>Здания, остановки, маршруты и запреты поворотов сохранятся без изменений</div>
         </div>
         <label className="field">Имя файла
           <input value={name} onChange={(e) => setName(e.target.value)} />

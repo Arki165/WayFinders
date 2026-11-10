@@ -3,6 +3,10 @@ const { app, BrowserWindow, ipcMain, dialog, screen, session } = require("electr
 const path = require("path");
 const fs = require("fs");
 
+// Программа переименована в Wayfinder, но настройки и свои шаблоны лежат в старой папке WayFinders.
+// Оставляем старую папку, иначе после обновления шаблоны и тема пропадут.
+app.setPath("userData", path.join(app.getPath("appData"), "WayFinders"));
+
 function createWindow() {
   // окно не больше свободной части экрана (без панели задач),
   // иначе на ноутбуке с масштабом 125-150% часть окна уходит за край
@@ -13,7 +17,8 @@ function createWindow() {
     minWidth: Math.min(1000, area.width),
     minHeight: Math.min(600, area.height),
     center: true,
-    title: "WayFinders",
+    title: "Wayfinder",
+    icon: path.join(__dirname, "..", "dist", "icon.png"), // значок окна (на Windows и Linux)
     backgroundColor: "#1a1f1c",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -77,7 +82,7 @@ ipcMain.handle("write-file", async (_e, { filePath, text }) => {
 // Overpass API отвечает 406 на запросы с подписью браузера (а Electron подписывается как Chrome).
 // Для запросов к Overpass представляемся программой со ссылкой на проект, как просят правила сервера.
 function setOverpassUserAgent() {
-  const ua = `WayFinders/${app.getVersion()} (+https://github.com/Arki165/WayFinders)`;
+  const ua = `Wayfinder/${app.getVersion()} (+https://github.com/Arki165/WayFinders)`;
   const urls = ["https://overpass-api.de/*", "https://*.overpass-api.de/*"];
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
     details.requestHeaders["User-Agent"] = ua;

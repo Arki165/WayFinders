@@ -13,17 +13,25 @@ import { parseOsm } from "./osm/parse";
 import { TEMPLATES } from "./model/templates";
 import { drivableNodeSet, isRoadSignal } from "./model/roads";
 import { VERSION } from "./version";
+import Icon, { Logo, type IconName } from "./components/Icon";
 
-const TOOLS: { id: Tool; key: string; label: string; icon: string }[] = [
-  { id: "select", key: "V", label: "Выбор и перенос", icon: "↖" },
-  { id: "draw", key: "W", label: "Нарисовать дорогу", icon: "✎" },
-  { id: "node", key: "N", label: "Добавить узел на дорогу", icon: "⊕" },
-  { id: "join", key: "J", label: "Соединить: узел с узлом или с дорогой", icon: "🔗" },
-  { id: "unjoin", key: "U", label: "Разъединить дороги в узле", icon: "⛓" },
-  { id: "signal", key: "T", label: "Светофор", icon: "🚦" },
-  { id: "split", key: "X", label: "Разрезать дорогу", icon: "✂" },
-  { id: "delete", key: "D", label: "Удалить", icon: "🗑" },
+// Инструменты слева, по группам: выбор | рисование | связи дорог | светофор | удаление. group - с него начинается новая группа
+const TOOLS: { id: Tool; key: string; label: string; icon: IconName; group?: true }[] = [
+  { id: "select", key: "V", label: "Выбор и перенос", icon: "select" },
+  { id: "draw", key: "W", label: "Нарисовать дорогу", icon: "draw", group: true },
+  { id: "node", key: "N", label: "Добавить узел на дорогу", icon: "node" },
+  { id: "join", key: "J", label: "Соединить: узел с узлом или с дорогой", icon: "join", group: true },
+  { id: "unjoin", key: "U", label: "Разъединить дороги в узле", icon: "unjoin" },
+  { id: "split", key: "X", label: "Разрезать дорогу", icon: "split" },
+  { id: "signal", key: "T", label: "Светофор", icon: "signal", group: true },
+  { id: "delete", key: "D", label: "Удалить", icon: "trash", group: true },
 ];
+
+// Сохраненная раскладка окна (какие панели открыты, их размеры, подложка)
+type Layout = { side?: "props" | "errors" | "history" | null; bottom?: "calc" | "compare" | "formulas" | null; sideWidth?: number; bottomHeight?: number; basemap?: Basemap; buildings?: boolean };
+function loadLayout(): Layout {
+  try { return JSON.parse(localStorage.getItem("layout") ?? "{}"); } catch { return {}; }
+}
 
 export default function App() {
   const data = useEditor((s) => s.data);
@@ -37,15 +45,17 @@ export default function App() {
   const st = useEditor;
 
   // null - панель скрыта, вместо нее узкая полоска с вкладками
-  const [side, setSide] = useState<"props" | "errors" | "history" | null>("props");
-  const [bottom, setBottom] = useState<"calc" | "compare" | "formulas" | null>("calc");
+  // раскладка окна запоминается между запусками: панели остаются такими, какими их оставили
+  const [saved] = useState(loadLayout);
+  const [side, setSide] = useState<"props" | "errors" | "history" | null>(saved.side === undefined ? "props" : saved.side);
+  const [bottom, setBottom] = useState<"calc" | "compare" | "formulas" | null>(saved.bottom === undefined ? "calc" : saved.bottom);
   // размеры панелей в пикселях, меняются перетаскиванием края
-  const [sideWidth, setSideWidth] = useState(360);
-  const [bottomHeight, setBottomHeight] = useState(320);
-  const [basemap, setBasemap] = useState<Basemap>("map");
+  const [sideWidth, setSideWidth] = useState(Math.min(saved.sideWidth ?? 360, Math.round(window.innerWidth * 0.6)));
+  const [bottomHeight, setBottomHeight] = useState(Math.min(saved.bottomHeight ?? 320, window.innerHeight - 250));
+  const [basemap, setBasemap] = useState<Basemap>(saved.basemap ?? "map");
   const [view3d, setView3d] = useState(false);
   const [heat, setHeat] = useState(false);
-  const [buildings, setBuildings] = useState(true);
+  const [buildings, setBuildings] = useState(saved.buildings ?? true);
   const [changesOn, setChangesOn] = useState(false);
   const [tpl, setTpl] = useState("secondary");
   const [dialog, setDialog] = useState<"save" | "import" | null>(null);
@@ -53,6 +63,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   // тема запоминается между запусками
   const [theme, setTheme] = useState(localStorage.getItem("theme") === "dark" ? "dark" : "light");
+
+  useEffect(() => {
+    try { localStorage.setItem("layout", JSON.stringify({ side, bottom, sideWidth, bottomHeight, basemap, buildings })); } catch { /* хранилище недоступно */ }
+  }, [side, bottom, sideWidth, bottomHeight, basemap, buildings]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -183,28 +197,24 @@ export default function App() {
       <header className="toolbar">
         {/* верхняя панель: логотип с именем файла, группы «файл», «правка», поиск, «вид» */}
         <div className="brand" title="Версия программы">
-          <svg className="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path d="M5 19 C 5 11, 19 13, 19 5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="0.1 4.2" />
-            <circle cx="5" cy="19" r="2.6" fill="currentColor" />
-            <circle cx="19" cy="5" r="2.6" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
+          <Logo size={28} />
           <span className="brand-text">
-            <b>WayFinders <small>v{VERSION}</small></b>
-            <span className="file">{fileName || "файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
+            <b>Wayfinder <small>v{VERSION}</small></b>
+            <span className="file">{fileName || "Файл не открыт"}{past.length > 0 && <i className="dirty" title="Есть несохраненные правки" />}</span>
           </span>
         </div>
         <div className="tb-group">
-          <button onClick={openFile} title="Открыть .osm (Ctrl+O)">Открыть</button>
-          <button onClick={addMap} disabled={!data || loading} title="Добавить карту: присоединить еще один .osm к открытой карте (соседний район или другой город). Дороги на стыке сшиваются">+ Карта</button>
-          <button onClick={() => setDialog("import")} title="Загрузить район или город из OpenStreetMap">Из OSM</button>
-          <button className="tb-save" onClick={() => setDialog("save")} disabled={!data} title="Сохранить .osm (Ctrl+S)">Сохранить</button>
+          <button onClick={openFile} title="Открыть .osm (Ctrl+O)"><Icon name="folder" /><span className="lbl-1">Открыть</span></button>
+          <button onClick={addMap} disabled={!data || loading} title="Добавить карту: присоединить еще один .osm к открытой карте (соседний район или другой город). Дороги на стыке сшиваются"><Icon name="addMap" /><span className="lbl-1">Карта</span></button>
+          <button onClick={() => setDialog("import")} title="Загрузить район или город из OpenStreetMap"><Icon name="globe" /><span className="lbl-1">Из OSM</span></button>
+          <button className="tb-save" onClick={() => setDialog("save")} disabled={!data} title="Сохранить .osm (Ctrl+S)"><Icon name="save" />Сохранить</button>
         </div>
         <div className="tb-group">
-          <button className="tb-icon" onClick={() => st.getState().undo()} disabled={!past.length} title="Отменить (Ctrl+Z)">↶</button>
-          <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!data} title="Повторить (Ctrl+Y)">↷</button>
+          <button className="tb-icon" onClick={() => st.getState().undo()} disabled={!past.length} title="Отменить (Ctrl+Z)"><Icon name="undo" /></button>
+          <button className="tb-icon" onClick={() => st.getState().redo()} disabled={!data} title="Повторить (Ctrl+Y)"><Icon name="redo" /></button>
         </div>
         <label className="tb-search">
-          <span aria-hidden="true">⌕</span>
+          <Icon name="search" size={16} />
           <input list="streets" placeholder="Найти улицу" disabled={!data} onKeyDown={(e) => e.key === "Enter" && search((e.target as HTMLInputElement).value)} onChange={(e) => names.includes(e.target.value) && search(e.target.value)} />
         </label>
         <datalist id="streets">{names.map((n) => <option key={n} value={n} />)}</datalist>
@@ -218,37 +228,39 @@ export default function App() {
           </select>
         </div>
         <div className="tb-group">
-          <button className={heat ? "on" : ""} onClick={() => setHeat(!heat)} title="Тепловая карта загрузки (H)">Загрузка Z</button>
-          <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)} title="Показать здания">Здания</button>
-          <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title="Показать на карте новые, измененные и удаленные дороги">Правки</button>
+          <button className={heat ? "on" : ""} onClick={() => setHeat(!heat)} title="Тепловая карта загрузки (H)"><Icon name="gauge" /><span className="lbl-2">Загрузка Z</span></button>
+          <button className={buildings ? "on" : ""} onClick={() => setBuildings(!buildings)} title="Показать здания"><Icon name="building" /><span className="lbl-2">Здания</span></button>
+          <button className={changesOn ? "on" : ""} onClick={() => setChangesOn(!changesOn)} title="Показать на карте новые, измененные и удаленные дороги"><Icon name="diff" /><span className="lbl-2">Правки</span></button>
         </div>
-        <button className="tb-icon tb-theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title={theme === "dark" ? "Светлая тема" : "Темная тема"}>{theme === "dark" ? "☀" : "☾"}</button>
+        <button className="tb-icon tb-theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title={theme === "dark" ? "Светлая тема" : "Темная тема"}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
       </header>
 
-      <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${side ? sideWidth + "px" : "36px"}` }}>
+      <div className="work" style={{ gridTemplateColumns: `54px minmax(0, 1fr) ${!data ? "" : side ? sideWidth + "px" : "36px"}` }}>
         <nav className="tools">
           {TOOLS.map((t) => (
-            <button key={t.id} className={"tool" + (tool === t.id ? " on" : "")} onClick={() => setTool(t.id)} title={`${t.label} (${t.key})`} disabled={!data}>
-              <span>{t.icon}</span><kbd>{t.key}</kbd>
+            <button key={t.id} className={"tool" + (tool === t.id ? " on" : "") + (t.group ? " tool-group" : "")} onClick={() => setTool(t.id)} title={`${t.label} (${t.key})`} disabled={!data}>
+              <Icon name={t.icon} size={20} /><kbd>{t.key}</kbd>
             </button>
           ))}
         </nav>
 
         <main className="center">
-          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} dark={theme === "dark"} />
-          {tool === "draw" && (
-            <div className="optbar">Шаблон новой дороги:
-              <select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
-            </div>
-          )}
+          <MapView basemap={basemap} view3d={view3d} heat={heat} showBuildings={buildings} showChanges={changesOn} drawTemplate={tpl} dark={theme === "dark"}>
+            {tool === "draw" && (
+              <div className="optbar">Шаблон новой дороги:
+                <select value={tpl} onChange={(e) => setTpl(e.target.value)}>{Object.entries(TEMPLATES).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}</select>
+              </div>
+            )}
+          </MapView>
           {!data && (
             <div className="start">
-              <h1>WayFinders</h1>
+              <Logo size={72} />
+              <h1>Wayfinder</h1>
               <p>Редактор графа улично-дорожной сети. Открывает .osm, правит дороги, полосы, направления, светофоры и мосты, находит ошибки и сохраняет .osm для MatSim, SUMO и Webots.</p>
               <div className="start-btns">
-                <button className="primary" onClick={openFile} disabled={loading}>Открыть файл .osm</button>
-                <button onClick={openExample} disabled={loading}>Открыть пример: Иркутск, example.osm</button>
-                <button onClick={() => setDialog("import")} disabled={loading}>Загрузить район из OpenStreetMap</button>
+                <button className="primary" onClick={openFile} disabled={loading}><Icon name="folder" />Открыть файл .osm</button>
+                <button onClick={openExample} disabled={loading}><Icon name="addMap" />Открыть пример: Иркутск, example.osm</button>
+                <button onClick={() => setDialog("import")} disabled={loading}><Icon name="globe" />Загрузить район из OpenStreetMap</button>
               </div>
               {loading && <p className="hint">Загрузка...</p>}
             </div>
@@ -261,7 +273,7 @@ export default function App() {
                 <button className={bottom === "compare" ? "on" : ""} onClick={() => setBottom("compare")}>Сравнение с исходным</button>
                 <button className={bottom === "formulas" ? "on" : ""} onClick={() => setBottom("formulas")}>Формулы</button>
                 <span className="grow" />
-                <button className="hide" onClick={() => setBottom(null)} title="Скрыть панель и отдать место карте">Скрыть ▾</button>
+                <button className="hide" onClick={() => setBottom(null)} title="Скрыть панель и отдать место карте"><span className="lbl">Скрыть</span><Icon name="chevronDown" size={14} /></button>
               </div>
               {bottom === "calc" && <CalcPanel />}
               {bottom === "compare" && <ComparePanel />}
@@ -270,14 +282,14 @@ export default function App() {
           )}
           {!bottom && data && (
             <div className="bottom-rail" title="Открыть нижнюю панель">
-              <button onClick={() => setBottom("calc")}>▴ Расчеты и графики</button>
-              <button onClick={() => setBottom("compare")}>▴ Сравнение с исходным</button>
-              <button onClick={() => setBottom("formulas")}>▴ Формулы</button>
+              <button onClick={() => setBottom("calc")}><Icon name="chevronUp" size={14} />Расчеты и графики</button>
+              <button onClick={() => setBottom("compare")}><Icon name="chevronUp" size={14} />Сравнение с исходным</button>
+              <button onClick={() => setBottom("formulas")}><Icon name="chevronUp" size={14} />Формулы</button>
             </div>
           )}
         </main>
 
-        {side ? (
+        {!data ? null : side ? (
           <aside className="side">
             <Resizer dir="x" value={sideWidth} min={280} max={Math.round(window.innerWidth * 0.6)} onChange={setSideWidth} />
             <div className="tabs">
@@ -285,7 +297,7 @@ export default function App() {
               <button className={side === "errors" ? "on" : ""} onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
               <button className={side === "history" ? "on" : ""} onClick={() => setSide("history")}>История</button>
               <span className="grow" />
-              <button className="hide" onClick={() => setSide(null)} title="Скрыть панель и отдать место карте">Скрыть ▸</button>
+              <button className="hide" onClick={() => setSide(null)} title="Скрыть панель и отдать место карте"><span className="lbl">Скрыть</span><Icon name="chevronRight" size={14} /></button>
             </div>
             {side === "props" && <PropsPanel />}
             {side === "errors" && <ErrorsPanel />}
@@ -293,7 +305,7 @@ export default function App() {
           </aside>
         ) : (
           <aside className="rail" title="Открыть правую панель">
-            <button onClick={() => setSide("props")}><span className="arrow">◂</span>Свойства</button>
+            <button onClick={() => setSide("props")}><Icon name="chevronLeft" size={14} className="arrow" />Свойства</button>
             <button onClick={() => setSide("errors")}>Ошибки {check && <span className={"badge" + (crit ? "" : " ok")}>{check.errors.length}</span>}</button>
             <button onClick={() => setSide("history")}>История</button>
           </aside>
@@ -309,7 +321,7 @@ export default function App() {
             <span className={crit ? "c-danger" : "c-ok"}>Критичных ошибок: {crit}</span>
             <span>Правок: {past.length}</span>
             <span className="grow" />
-            <span>V выбор · W дорога · N узел · J соединить · U разъединить · T светофор · X разрезать · D удалить · R направление · Del удалить выделенное · 3 2D/3D · H загрузка · Ctrl+Z отмена</span>
+            <span className="keys" title="Горячие клавиши">V выбор · W дорога · N узел · J соединить · U разъединить · T светофор · X разрезать · D удалить · R направление · Del удалить выделенное · 3 2D/3D · H загрузка · Ctrl+Z отмена</span>
           </>
         ) : <span>Откройте файл .osm, пример или загрузите район из OpenStreetMap</span>}
       </footer>
