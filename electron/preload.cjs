@@ -7,6 +7,6 @@ contextBridge.exposeInMainWorld("api", {
   savePng: (defaultName, base64) => ipcRenderer.invoke("save-png", { defaultName, base64 }),
   saveBinary: (defaultName, base64, filters) => ipcRenderer.invoke("save-binary", { defaultName, base64, filters }),
   savePdf: (defaultName, html) => ipcRenderer.invoke("save-pdf", { defaultName, html }),
-  readExample: (name) => ipcRenderer.invoke("read-example", name),
+  readExample: () => ipcRenderer.invoke("read-example"),
   writeFile:(filePath, text) => ipcRenderer.invoke("write-file", { filePath, text }),
 });
