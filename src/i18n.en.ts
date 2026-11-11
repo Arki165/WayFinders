@@ -912,4 +912,6 @@ export const EN: Record<string, string> = {
   "Магнит: прилипание к узлам и дорогам": "Snap to nodes and roads",
   "Узел перенесен и соединен с узлом": "Node moved and joined to a node",
   "Узел перенесен и соединен с дорогой": "Node moved and joined to a road",
+  "Демо: Иркутск после редактора": "Demo: Irkutsk after editing",
+  "Тот же участок Иркутска после редактора: ошибки исправлены, заданы замеры и время светофоров. Замеры условные": "The same part of Irkutsk after editing: errors fixed, counts and signal times set. The counts are illustrative",
 };

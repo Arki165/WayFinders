@@ -135,9 +135,10 @@ ipcMain.handle("save-pdf", async (_e, { defaultName, html }) => {
   return res.filePath;
 });
 
-// Встроенный пример example.osm (участок Иркутска от организаторов)
-ipcMain.handle("read-example", async () => {
-  const p = process.env.VITE_DEV ? path.join(__dirname, "..", "public", "example.osm") : path.join(__dirname, "..", "dist", "example.osm");
+// Встроенные файлы: example.osm (участок Иркутска от организаторов) и demo.osm (тот же участок после редактора, с замерами)
+ipcMain.handle("read-example", async (_e, name) => {
+  const file = name === "demo.osm" ? "demo.osm" : "example.osm";
+  const p = process.env.VITE_DEV ? path.join(__dirname, "..", "public", file) : path.join(__dirname, "..", "dist", file);
   return fs.readFileSync(p, "utf8");
 });
 

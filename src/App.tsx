@@ -166,18 +166,21 @@ export default function App() {
       }
     }, 30);
   }
-  async function openExample() {
+  // Встроенный файл: example.osm - сырой пример, demo.osm - он же после редактора с замерами для показа
+  async function openExample(name = "example.osm") {
     if (!okToReplace()) return;
     setLoading(true);
     try {
       let text: string;
-      if (window.api) text = await window.api.readExample();
+      if (window.api) text = await window.api.readExample(name);
       else {
-        const res = await fetch("./example.osm");
+        const res = await fetch("./" + name);
         if (!res.ok) throw new Error(tr("файл не найден ({0})", res.status));
         text = await res.text();
       }
-      loadText(text, "example.osm", null);
+      loadText(text, name, null);
+      // демо сразу показывает картограмму загрузки: за этим его и открывают
+      if (name === "demo.osm") setHeat(true);
     } catch (e) {
       setLoading(false);
       st.getState().toast(tr("Не удалось открыть пример: ") + (e instanceof Error ? e.message : e) + tr(". Запустите программу через npm start."));
@@ -303,7 +306,8 @@ export default function App() {
               <p>{tr("Редактор графа улично-дорожной сети. Открывает .osm, правит дороги, полосы, направления, светофоры и мосты, находит ошибки и сохраняет .osm для MatSim, SUMO и Webots.")}</p>
               <div className="start-btns">
                 <button className="primary" onClick={openFile} disabled={loading}><Icon name="folder" />{tr("Открыть файл .osm")}</button>
-                <button onClick={openExample} disabled={loading}><Icon name="addMap" />{tr("Открыть пример: Иркутск, example.osm")}</button>
+                <button onClick={() => openExample()} disabled={loading}><Icon name="addMap" />{tr("Открыть пример: Иркутск, example.osm")}</button>
+                <button onClick={() => openExample("demo.osm")} disabled={loading} title={tr("Тот же участок Иркутска после редактора: ошибки исправлены, заданы замеры и время светофоров. Замеры условные")}><Icon name="gauge" />{tr("Демо: Иркутск после редактора")}</button>
                 <button onClick={() => setDialog("import")} disabled={loading}><Icon name="globe" />{tr("Загрузить район из OpenStreetMap")}</button>
               </div>
               {loading && <p className="hint">{tr("Загрузка...")}</p>}
