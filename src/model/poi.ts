@@ -18,6 +18,8 @@ export function poiKind(n: OsmNode): PoiKind | null {
   if (t.railway === "subway_entrance") return "entrance";
   // остановку трамвая часто ставят прямо на рельсы, отдельной платформы нет
   if (t.railway === "tram_stop") return "tram";
+  // платформа трамвая без railway=tram_stop (так ее часто размечают по схеме public_transport v2)
+  if (t.public_transport === "platform" && t.tram === "yes" && t.bus !== "yes") return "tram";
   // место остановки поезда или автобуса на линии - служебная точка, ее не показываем (есть платформа или станция)
   if (t.public_transport === "stop_position") return null;
   // переход со светофором показывает слой светофоров

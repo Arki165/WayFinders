@@ -58,17 +58,17 @@ export const CLASS_HINT: Record<string, string> = {
   get unclassified() { return tr("улица или дорога без класса"); },
 };
 
-// Покрытие дороги и коэффициент снижения скорости (условные значения, уточняют транспортники).
+// Покрытие дороги и коэффициент сцепления шины с покрытием φ (сухое покрытие, условные значения, уточняют транспортники).
 // По правилам OSM щебень записывается как gravel, гравий (галька) как pebblestone.
 export const SURFACES: Record<string, { ru: string; k: number }> = {
-  asphalt: { get ru() { return tr("Асфальт"); }, k: 1.0 },
-  concrete: { get ru() { return tr("Бетон"); }, k: 1.0 },
-  paving_stones: { get ru() { return tr("Плитка"); }, k: 0.8 },
-  sett: { get ru() { return tr("Брусчатка"); }, k: 0.7 },
-  gravel: { get ru() { return tr("Щебень"); }, k: 0.6 },
-  compacted: { get ru() { return tr("Укатанный щебень"); }, k: 0.75 },
-  fine_gravel: { get ru() { return tr("Мелкий гравий"); }, k: 0.65 },
-  pebblestone: { get ru() { return tr("Гравий"); }, k: 0.6 },
+  asphalt: { get ru() { return tr("Асфальт"); }, k: 0.8 },
+  concrete: { get ru() { return tr("Бетон"); }, k: 0.75 },
+  paving_stones: { get ru() { return tr("Плитка"); }, k: 0.65 },
+  sett: { get ru() { return tr("Брусчатка"); }, k: 0.6 },
+  gravel: { get ru() { return tr("Щебень"); }, k: 0.55 },
+  compacted: { get ru() { return tr("Укатанный щебень"); }, k: 0.6 },
+  fine_gravel: { get ru() { return tr("Мелкий гравий"); }, k: 0.55 },
+  pebblestone: { get ru() { return tr("Гравий"); }, k: 0.5 },
   ground: { get ru() { return tr("Грунт"); }, k: 0.5 },
   sand: { get ru() { return tr("Песок"); }, k: 0.4 },
 };

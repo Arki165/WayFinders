@@ -1,6 +1,6 @@
 // Вкладка «Маршруты»: автобусы, троллейбусы, трамваи и маршрутки из файла.
 // Клик по маршруту показывает его на карте: линия по дорогам и остановки по порядку.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor } from "../model/store";
 import { createRoute, deleteRoute, listRoutes, ROUTE_KINDS, ROUTE_RU, setRouteInfo, useRoute, type Route, type RouteKind } from "../model/routes";
 import Icon from "./Icon";
@@ -80,6 +80,7 @@ export default function RoutesPanel() {
             <div className="route-edit">
               <RouteForm key={sel.id} title="" initial={sel} onSave={(k, ref) => setRouteInfo(sel.id, k, ref)} saveLabel={tr("Сохранить")} />
               <p className="hint">{tr("Кликайте на карте дороги по порядку движения: дорога добавится в маршрут, повторный клик уберет ее. Так же кликайте значки остановок. Отменить: Ctrl+Z.")}</p>
+              <NewStop kind={sel.kind} />
               <div className="chips">
                 <button className="on" onClick={() => edit(false)}>{tr("Готово")}</button>
                 {sel.custom && <button className="danger" onClick={() => { if (confirm(tr("Удалить маршрут {0}?", sel.ref))) deleteRoute(sel.id); }}><Icon name="trash" size={14} />{tr("Удалить маршрут")}</button>}
@@ -108,6 +109,24 @@ export default function RoutesPanel() {
         {!shown.length && <p className="hint">{tr("Ничего не найдено")}</p>}
       </div>
     </div>
+  );
+}
+
+// Новая остановка: название, затем клик по карте - остановка встает в этой точке и добавляется в конец маршрута
+function NewStop({ kind }: { kind: RouteKind }) {
+  const placing = useRoute((s) => s.placing);
+  const place = useRoute((s) => s.place);
+  const [name, setName] = useState("");
+  // остановка поставлена (ожидание клика закончилось) - поле названия очищается для следующей
+  const was = useRef(false);
+  useEffect(() => { if (was.current && placing === null) setName(""); was.current = placing !== null; }, [placing]);
+  return (
+    <form className="route-form new-stop" onSubmit={(e) => { e.preventDefault(); place(placing === null ? name : null); }}>
+      <label><span>{kind === "tram" ? tr("Новая трамвайная остановка") : tr("Новая остановка")}</span><input value={name} onChange={(e) => { setName(e.target.value); if (placing !== null) place(e.target.value); }} placeholder={tr("Название")} /></label>
+      <div className="chips">
+        <button type="submit" className={placing !== null ? "on" : ""}><Icon name="plus" size={14} />{placing !== null ? tr("Кликните место на карте...") : tr("Поставить на карте")}</button>
+      </div>
+    </form>
   );
 }
 

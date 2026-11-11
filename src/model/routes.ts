@@ -2,9 +2,9 @@
 // В OSM маршрут - это отношение (relation) type=route: в нем по порядку дороги, по которым едет
 // транспорт, и остановки (роль stop или platform). Номер маршрута - тег ref, цвет - colour.
 import { create } from "zustand";
-import type { OsmData, OsmRelation } from "../osm/types";
+import type { OsmData, OsmNode, OsmRelation, Tags } from "../osm/types";
 import { distM } from "./geo";
-import { newId, runRelation, useEditor } from "./store";
+import { batch, newId, runRelation, setNodeTags, useEditor } from "./store";
 import { tr } from "../i18n";
 
 export type RouteKind = "bus" | "trolleybus" | "tram" | "share_taxi";
@@ -54,10 +54,13 @@ function toRoute(data: OsmData, r: OsmRelation): Route | null {
         if (a && b) lengthM += distM(a.lat, a.lon, b.lat, b.lon);
       }
     } else if (m.type === "node" && /stop|platform/.test(m.role)) {
-      // у одной остановки бывает и место остановки, и платформа: показываем платформу, если она есть
-      if (!data.nodes.has(m.ref)) continue;
-      if (m.role.startsWith("stop") && r.members.some((x) => x.type === "node" && x.role.startsWith("platform"))) continue;
-      stops.push(m.ref);
+      // у одной остановки бывает и место остановки на дороге (рельсах), и платформа: показываем платформу.
+      // Место остановки пропускаем, только если платформа этой же остановки есть в файле: в выгрузке часто
+      // у одних остановок есть только платформа, у других только место остановки (так было у трамвая)
+      const n = data.nodes.get(m.ref);
+      if (!n) continue;
+      if (m.role.startsWith("stop") && r.members.some((x) => x.type === "node" && x.role.startsWith("platform") && sameStop(n, data.nodes.get(x.ref)))) continue;
+      if (!stops.includes(m.ref)) stops.push(m.ref);
     }
   }
   // название: «Автобус 16: Центр => Аэропорт» - берем часть после двоеточия, иначе from - to
@@ -75,9 +78,79 @@ export function listRoutes(data: OsmData): Route[] {
   return out.sort((a, b) => ROUTE_KINDS.indexOf(a.kind) - ROUTE_KINDS.indexOf(b.kind) || num(a.ref) - num(b.ref) || a.ref.localeCompare(b.ref, "ru") || a.name.localeCompare(b.name, "ru"));
 }
 
-// Маршруты, которые останавливаются на этой остановке (или проходят через этот узел)
+// Платформа и место остановки - одна остановка: рядом друг с другом и с одним названием (или без названия)
+const SAME_STOP_M = 80;
+export function sameStop(a: OsmNode | undefined, b: OsmNode | undefined): boolean {
+  if (!a || !b) return false;
+  if (a.id === b.id) return true;
+  if (a.tags.name && b.tags.name && a.tags.name !== b.tags.name) return false;
+  return distM(a.lat, a.lon, b.lat, b.lon) < SAME_STOP_M;
+}
+
+// Маршруты, которые останавливаются на этой остановке: узел записан в маршруте остановкой или платформой,
+// либо в маршруте записана вторая половина этой же остановки (платформа к месту остановки и наоборот)
 export function routesAtNode(data: OsmData, nodeId: number): Route[] {
-  return listRoutes(data).filter((r) => r.stops.includes(nodeId));
+  const node = data.nodes.get(nodeId);
+  if (!node) return [];
+  const ids = new Set<number>();
+  for (const r of data.relations.values()) {
+    if (r.tags.type !== "route" || !isRouteKind(r.tags.route)) continue;
+    if (r.members.some((m) => m.type === "node" && /stop|platform/.test(m.role) && sameStop(node, data.nodes.get(m.ref)))) ids.add(r.id);
+  }
+  return listRoutes(data).filter((r) => ids.has(r.id));
+}
+
+// ---------- остановки ----------
+// Теги остановки по виду транспорта (схема OSM public_transport v2: платформа рядом с дорогой)
+const STOP_KEYS = ["highway", "railway", "public_transport", "bus", "trolleybus", "tram", "share_taxi"];
+export function stopTags(kind: RouteKind, name: string): Tags {
+  const t: Tags = kind === "tram" ? { railway: "tram_stop", public_transport: "platform", tram: "yes" } : { highway: "bus_stop", public_transport: "platform", bus: "yes" };
+  if (kind === "trolleybus") t.trolleybus = "yes";
+  if (kind === "share_taxi") t.share_taxi = "yes";
+  if (name.trim()) t.name = name.trim();
+  return t;
+}
+// Вид остановки по тегам (для переключателя в панели узла)
+export function stopKindOf(t: Tags): RouteKind {
+  if (t.railway === "tram_stop" || t.tram === "yes") return "tram";
+  if (t.trolleybus === "yes") return "trolleybus";
+  if (t.share_taxi === "yes") return "share_taxi";
+  return "bus";
+}
+
+// Новая остановка-платформа в точке (lat, lon). routeId - сразу добавить в этот маршрут.
+// Одна правка в истории: отмена убирает и остановку, и ее место в маршруте
+export function createStop(kind: RouteKind, lat: number, lon: number, name: string, routeId: number | null): number {
+  const d = useEditor.getState().data;
+  if (!d) return 0;
+  const id = newId();
+  const label = tr("Новая остановка") + (name.trim() ? " " + tr("«{0}»", name.trim()) : "");
+  batch(label, () => {
+    useEditor.getState().run(label, [], [], () => { d.nodes.set(id, { id, lat, lon, tags: stopTags(kind, name), attrs: {} }); });
+    if (routeId !== null && d.relations.has(routeId)) toggleRouteStop(routeId, id, "platform");
+  });
+  return id;
+}
+
+// Название и вид остановки. Свои маршруты через эту остановку получают новое название начала или конца
+export function setStop(nodeId: number, kind: RouteKind, name: string) {
+  const d = useEditor.getState().data;
+  const n = d?.nodes.get(nodeId);
+  if (!d || !n) return;
+  const t: Tags = { ...n.tags };
+  // вид меняем, только если он другой: иначе теги из OSM (например, место остановки на рельсах) остаются как есть
+  if (stopKindOf(t) !== kind || !Object.keys(t).some((k) => STOP_KEYS.includes(k))) {
+    for (const k of STOP_KEYS) delete t[k];
+    Object.assign(t, stopTags(kind, ""));
+  }
+  if (name.trim()) t.name = name.trim(); else delete t.name;
+  batch(tr("Остановка"), () => {
+    setNodeTags(nodeId, t, tr("Остановка"));
+    for (const r of d.relations.values()) {
+      if (r.tags[CUSTOM_KEY] !== "yes" || !r.members.some((m) => m.type === "node" && m.ref === nodeId)) continue;
+      runRelation(tr("Маршрут ") + (r.tags.ref ?? ""), r.id, (dd) => renameRoute(dd, dd.relations.get(r.id)!));
+    }
+  });
 }
 
 // При разрезании дороги новая половина тоже входит во все маршруты исходной дороги,
@@ -91,10 +164,12 @@ export function copyRouteMembership(data: OsmData, fromWay: number, newWay: numb
 }
 
 // Какой маршрут выбран в списке (показывается на карте) и правим ли мы его сейчас
-export const useRoute = create<{ id: number | null; editing: boolean; set: (id: number | null) => void; edit: (on: boolean) => void }>((set) => ({
-  id: null, editing: false,
-  set: (id) => set({ id, editing: false }),
-  edit: (editing) => set({ editing }),
+// placing - ждем клика по карте, куда поставить новую остановку (строка - ее название)
+export const useRoute = create<{ id: number | null; editing: boolean; placing: string | null; set: (id: number | null) => void; edit: (on: boolean) => void; place: (name: string | null) => void }>((set) => ({
+  id: null, editing: false, placing: null,
+  set: (id) => set({ id, editing: false, placing: null }),
+  edit: (editing) => set({ editing, placing: null }),
+  place: (placing) => set({ placing }),
 }));
 
 // ---------- свои маршруты ----------
@@ -150,14 +225,14 @@ export function toggleRouteWay(id: number, wayId: number) {
   });
 }
 
-// Клик по остановке: добавить в конец списка остановок или убрать
-export function toggleRouteStop(id: number, nodeId: number) {
+// Клик по остановке: добавить в конец списка остановок или убрать. asRole - роль для новой остановки
+export function toggleRouteStop(id: number, nodeId: number, asRole?: "stop" | "platform") {
   const d = useEditor.getState().data;
   const r = d?.relations.get(id);
   if (!r) return;
   const has = r.members.some((m) => m.type === "node" && m.ref === nodeId);
   // если в маршруте остановки записаны платформами, новую тоже записываем платформой (иначе ее не будет видно)
-  const role = r.members.some((m) => m.type === "node" && m.role.startsWith("platform")) ? "platform" : "stop";
+  const role = asRole ?? (r.members.some((m) => m.type === "node" && m.role.startsWith("platform")) ? "platform" : "stop");
   runRelation(has ? tr("Остановка убрана из маршрута") : tr("Остановка добавлена в маршрут"), id, (dd) => {
     const x = dd.relations.get(id)!;
     if (has) x.members = x.members.filter((m) => !(m.type === "node" && m.ref === nodeId));

@@ -11,9 +11,9 @@ import {
 } from "../model/roads";
 import { distM, wayLengthM } from "../model/geo";
 import { poiKind, walkRadius } from "../model/poi";
-import { routesAtNode, ROUTE_RU, useRoute } from "../model/routes";
+import { routesAtNode, ROUTE_KINDS, ROUTE_RU, setStop, stopKindOf, useRoute, type RouteKind } from "../model/routes";
 import { TEMPLATES, MODIFIERS, loadCustom, saveCustom, type CustomTemplate } from "../model/templates";
-import { calcWay, capacityPerLane, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
+import { calcWay, capacityPerLane, clampPhi, frictionOf, FRICTION_KEY, PHI_MAX, PHI_MIN, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { getMapBounds } from "./MapView";
 import type { OsmNode, OsmWay, Tags } from "../osm/types";
 import Icon from "./Icon";
@@ -65,6 +65,9 @@ function RoadFields({ get, set }: Fields) {
   const speed = get((w) => w.tags.maxspeed ?? "");
   const surface = get((w) => w.tags.surface ?? "");
   const defSpeed = get((w) => String(maxSpeed(w)));
+  // сцепление: свое у дороги (тег) или по покрытию из нормативов
+  const ownPhi = get((w) => w.tags[FRICTION_KEY] ?? "");
+  const normPhi = get((w) => String(frictionOf({ ...w, tags: { ...w.tags, [FRICTION_KEY]: "" } }, norms).phi));
   const bus = get((w) => (w.tags.busway === "lane" ? "both" : w.tags["busway:right"] === "lane" ? "right" : "no"));
   const n = lanes === null ? null : Number(lanes);
 
@@ -97,9 +100,23 @@ function RoadFields({ get, set }: Fields) {
       <select value={surface ?? "*"} onChange={(e) => set({ surface: e.target.value }, tr("Покрытие"))}>
         {surface === null && <option value="*">{tr("Разное")}</option>}
         <option value="">{tr("Не задано")}</option>
-        {Object.entries(SURFACES).map(([k, v]) => <option key={k} value={k}>{v.ru} (×{norms.surfaceK[k] ?? v.k})</option>)}
+        {Object.entries(SURFACES).map(([k, v]) => <option key={k} value={k}>{v.ru} (φ {norms.friction[k] ?? v.k})</option>)}
         {surface && !SURFACES[surface] && <option value={surface}>{surfaceName(surface)} {" "}{tr("(из файла)")}</option>}
       </select>
+      <span title={tr("Коэффициент сцепления шины с покрытием, от {0} до {1}. Пусто - по покрытию из нормативов", PHI_MIN, PHI_MAX)}>{tr("Сцепление φ")}</span>
+      <div className="step">
+        <input className="phi-input" type="number" step="0.05" min={PHI_MIN} max={PHI_MAX} key={"phi" + ownPhi + normPhi} defaultValue={ownPhi ?? ""} placeholder={normPhi ?? tr("разное")}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          onBlur={(e) => {
+            const s = e.target.value.trim().replace(",", ".");
+            if (s === "") { if (ownPhi) set({}, tr("Сцепление по покрытию"), [FRICTION_KEY]); return; }
+            const c = clampPhi(Number(s));
+            if (c === null) { e.target.value = ownPhi ?? ""; return; }
+            e.target.value = String(c);
+            if (String(c) !== ownPhi) set({ [FRICTION_KEY]: String(c) }, tr("Сцепление φ"));
+          }} />
+        <small className="hint">{ownPhi ? tr("свое у дороги") : tr("по покрытию")}</small>
+      </div>
       <span title={tr("Мост или тоннель")}>{tr("Искусственные сооружения")}</span>
       <div className="seg">
         {(["ground", "bridge", "tunnel"] as const).map((v) => (
@@ -213,7 +230,7 @@ function WayPanel({ way }: { way: OsmWay }) {
       <LanePanel way={way} />
 
       <div className="mini-calc">
-        <div><small>{tr("V своб")}</small><b>{fmt(c.Vfree)} {" "}{tr("км/ч")}</b><small>{c.kSurface !== 1 ? `${fmt(c.Vmax)} × ${c.kSurface}` : tr("по знаку")}</small></div>
+        <div><small>{tr("V своб")}</small><b>{fmt(c.Vfree)} {" "}{tr("км/ч")}</b><small>{c.kSurface < 1 ? `${fmt(c.Vmax)} × ${c.kSurface.toFixed(2)} (φ ${c.phi})` : tr("по знаку")}</small></div>
         <div><small>{tr("T своб")}</small><b>{fmt(c.Tfree, 2)} {" "}{tr("мин")}</b><small>{tr("L / V своб")}</small></div>
         <div title={tr("Пропускная способность: число полос × норматив полосы (вкладка «Нормативы»)")}><small>{tr("P, авт/ч")}</small><b>{fmt(c.P)}</b><small>{c.lanes} {" "}{tr("пол. ×")}{" "}{fmt(capacityPerLane(way, norms))}</small></div>
         {c.Z !== null && <div title={tr("Коэффициент загрузки Z = N / P, пороги из нормативов")}><small>Z</small><b><span className="zpill" style={{ background: `rgb(${Z_COLORS[zLevel(c.Z, norms)].join(",")})` }}>{fmt(c.Z, 2)}</span></b><small>{Z_TEXT[zLevel(c.Z, norms)]}</small></div>}
@@ -339,6 +356,31 @@ function areaM2(data: { nodes: Map<number, OsmNode> }, w: OsmWay): number {
 const SIDE_NOM: Record<string, string> = { get N() { return tr("Север"); }, get NE() { return tr("Северо-восток"); }, get E() { return tr("Восток"); }, get SE() { return tr("Юго-восток"); }, get S() { return tr("Юг"); }, get SW() { return tr("Юго-запад"); }, get W() { return tr("Запад"); }, get NW() { return tr("Северо-запад"); } };
 const SIDE_ADJ: Record<string, string> = { get N() { return tr("северной"); }, get NE() { return tr("северо-восточной"); }, get E() { return tr("восточной"); }, get SE() { return tr("юго-восточной"); }, get S() { return tr("южной"); }, get SW() { return tr("юго-западной"); }, get W() { return tr("западной"); }, get NW() { return tr("северо-западной"); } };
 
+// Остановка: название и вид транспорта. Для любой другой точки без дорожных тегов - кнопки «Сделать остановкой»
+function StopBox({ node, stop }: { node: OsmNode; stop: boolean }) {
+  const t = node.tags;
+  const kind = stopKindOf(t);
+  if (!stop) {
+    if (t.highway || t.railway || t.public_transport) return null;
+    return (
+      <>
+        <h3>{tr("Сделать остановкой")}</h3>
+        <div className="chips">{ROUTE_KINDS.map((k) => <button key={k} onClick={() => setStop(node.id, k, t.name ?? "")}>{ROUTE_RU[k]}</button>)}</div>
+      </>
+    );
+  }
+  return (
+    <div className="form">
+      <span>{tr("Название")}</span>
+      <input defaultValue={t.name ?? ""} key={node.id + (t.name ?? "")} placeholder={tr("Остановка без названия")}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        onBlur={(e) => { if (e.target.value.trim() !== (t.name ?? "")) setStop(node.id, kind, e.target.value); }} />
+      <span>{tr("Транспорт")}</span>
+      <div className="seg">{ROUTE_KINDS.map((k: RouteKind) => <button key={k} className={kind === k ? "on" : ""} onClick={() => kind !== k && setStop(node.id, k, t.name ?? "")}>{ROUTE_RU[k]}</button>)}</div>
+    </div>
+  );
+}
+
 // Остановка: зона пешей доступности (круг на карте) и сколько домов в нее попадает
 function WalkZone({ node }: { node: OsmNode }) {
   const data = useEditor((s) => s.data)!;
@@ -415,6 +457,7 @@ function NodePanel({ node }: { node: OsmNode }) {
           else change({ highway: "traffic_signals", ...(cross ? { crossing: "traffic_signals" } : {}) }, tr("Светофор добавлен"));
         }}>{isSignal ? tr("Есть") : tr("Нет")}</button>
       </div>}
+      <StopBox node={node} stop={stop} />
       <WalkZone node={node} />
       {!onRoad && isSignal && <p className="hint">{tr("Узел не лежит на проезжей дороге: светофор здесь не учитывается (например, железнодорожный сигнал).")}</p>}
       {isSignal && onRoad && <SignalBox node={node} arms={arms.filter((a) => a.incoming)} change={change} />}

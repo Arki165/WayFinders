@@ -19,7 +19,7 @@ const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind
 
 const POI_TEXT: Record<PoiKind, string> = { get crossing() { return tr("Пешеходный переход"); }, get bus() { return tr("Автобусная остановка"); }, get tram() { return tr("Трамвайная остановка"); }, get train() { return tr("Ж/д станция или платформа"); }, get metro() { return tr("Станция метро"); }, get entrance() { return tr("Вход в метро"); } };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
-import { getRoute, routeBridges, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
+import { createStop, getRoute, routeBridges, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
 import Icon from "./Icon";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
@@ -618,6 +618,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       // правка маршрута: клик по дороге добавляет ее в маршрут или убирает, клик по остановке - то же с остановкой
       const rt = useRoute.getState();
       if (t === "select" && rt.editing && rt.id !== null && st.data.relations.has(rt.id)) {
+        // новая остановка: встает в точку клика рядом с дорогой и сразу входит в маршрут
+        if (rt.placing !== null) {
+          const kind = getRoute(st.data, rt.id)?.kind ?? "bus";
+          const id = createStop(kind, e.lngLat.lat, e.lngLat.lng, rt.placing, rt.id);
+          rt.place(null);
+          if (id) st.toast(tr("Остановка добавлена в маршрут. Название и вид - в панели «Свойства» (клик по значку)"));
+          return;
+        }
         if (nodeId !== null) {
           const k = poiKindOf(st.data.nodes.get(nodeId));
           if (k === "bus" || k === "tram") return toggleRouteStop(rt.id, nodeId);

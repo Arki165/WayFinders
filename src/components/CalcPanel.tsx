@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Chart, registerables } from "chart.js";
 import { useEditor, setWayTags } from "../model/store";
-import { calcWay, DEFAULT_NORMS, MEASURE_KEYS, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
+import { calcWay, clampPhi, DEFAULT_NORMS, MEASURE_KEYS, PHI_MAX, PHI_MIN, PHI_REF, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
 import { saveCsv, savePdf, savePng, saveXlsx, toCsv } from "../model/exporting";
 import type { Cell } from "../model/xlsx";
@@ -153,10 +153,10 @@ export default function CalcPanel() {
     setWayTags(id, tags, key === MEASURE_KEYS.volume ? tr("Замер N") : tr("Замер T факт"));
   };
   // Таблица расчета для выгрузки: заголовок и строки (одна и та же для CSV, Excel и PDF)
-  const TABLE_HEAD = ["way id", tr("Дорога"), tr("L, км"), tr("V max, км/ч"), tr("k покрытия"), tr("V своб, км/ч"), tr("T своб, мин"), tr("Полос"), tr("P, авт/ч"), tr("N, авт/ч"), tr("T факт, мин"), "Z", tr("Загрузка"), tr("V ср, км/ч"), tr("q, авт/км"), tr("T зад, мин"), "D, %"];
+  const TABLE_HEAD = ["way id", tr("Дорога"), tr("L, км"), tr("V max, км/ч"), tr("φ сцепления"), tr("k скорости"), tr("V своб, км/ч"), tr("T своб, мин"), tr("Полос"), tr("P, авт/ч"), tr("N, авт/ч"), tr("T факт, мин"), "Z", tr("Загрузка"), tr("V ср, км/ч"), tr("q, авт/км"), tr("T зад, мин"), "D, %"];
   const tableRows = (): Cell[][] => {
     const r = (x: number | null, n: number) => (x === null || !isFinite(x) ? null : +x.toFixed(n));
-    return rows.map(({ id, name, c }) => [id, name, r(c.L, 3), c.Vmax, c.kSurface, r(c.Vfree, 1), r(c.Tfree, 2), c.lanes, c.P, c.N, c.Tfact, r(c.Z, 2), c.Z === null ? "" : tr(Z_TEXT[zLevel(c.Z, norms)]), r(c.Vavg, 1), r(c.q, 1), r(c.Tdelay, 2), r(c.D, 0)]);
+    return rows.map(({ id, name, c }) => [id, name, r(c.L, 3), c.Vmax, c.phi, r(c.kSurface, 3), r(c.Vfree, 1), r(c.Tfree, 2), c.lanes, c.P, c.N, c.Tfact, r(c.Z, 2), c.Z === null ? "" : tr(Z_TEXT[zLevel(c.Z, norms)]), r(c.Vavg, 1), r(c.q, 1), r(c.Tdelay, 2), r(c.D, 0)]);
   };
   const base = () => fileName.replace(/\.osm$/i, "");
   const exportCsv = () => saveCsv(base() + "_calc.csv", toCsv(TABLE_HEAD, tableRows()));
@@ -223,7 +223,7 @@ export default function CalcPanel() {
                   <tr key={id} className={selection?.kind === "way" && selection.id === id ? "sel" : ""}>
                     <td className="click" onClick={() => select({ kind: "way", id })}>{name}</td>
                     <td className="r">{fmt(c.L, 3)}</td>
-                    <td className="r" title={`${c.Vmax} × ${c.kSurface}`}>{fmt(c.Vfree, 1)}</td>
+                    <td className="r" title={`${c.Vmax} × √(${c.phi} / ${PHI_REF}) = ${c.Vmax} × ${c.kSurface.toFixed(2)}`}>{fmt(c.Vfree, 1)}</td>
                     <td className="r"><b>{fmt(c.Tfree, 2)}</b></td>
                     <td className="r">{fmt(c.P)}</td>
                     <td className="r"><input defaultValue={c.N ?? ""} key={"n" + id + c.N} placeholder={tr("Замер")} onBlur={(e) => e.target.value !== String(c.N ?? "") && setMeasure(id, MEASURE_KEYS.volume, e.target.value)} /></td>
@@ -280,7 +280,7 @@ function NormsEditor() {
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       const cur = useEditor.getState().norms;
-      setNorms({ ...cur, ...patch, laneCapacity: { ...cur.laneCapacity, ...patch.laneCapacity }, surfaceK: { ...cur.surfaceK, ...patch.surfaceK } });
+      setNorms({ ...cur, ...patch, laneCapacity: { ...cur.laneCapacity, ...patch.laneCapacity }, friction: { ...cur.friction, ...patch.friction } });
     }, 250);
   };
   // пустое или неверное число не применяем, пока пользователь еще печатает
@@ -299,10 +299,11 @@ function NormsEditor() {
         </tbody>
       </table>
       <table className="tbl">
-        <thead><tr><th>{tr("Покрытие")}</th><th className="r">{tr("Коэффициент скорости")}</th></tr></thead>
+        <thead><tr><th>{tr("Покрытие")}</th><th className="r" title={tr("Коэффициент сцепления шины с покрытием, от {0} до {1}", PHI_MIN, PHI_MAX)}>{tr("Сцепление φ")}</th></tr></thead>
         <tbody>
-          {Object.entries(norms.surfaceK).map(([k, v]) => (
-            <tr key={k}><td>{SURFACES[k]?.ru ?? k}</td><td className="r"><input type="number" step="0.05" defaultValue={v} key={"s" + k + resets} onChange={(e) => { const x = num(e.target.value); if (x !== null && x > 0 && x <= 1) upd({ surfaceK: { [k]: x } }); }} /></td></tr>
+          {Object.entries(norms.friction).map(([k, v]) => (
+            // число вне 0,1-1 приводится к границе: при вводе применяется сразу, при выходе из поля исправляется и в поле
+            <tr key={k}><td>{SURFACES[k]?.ru ?? k}</td><td className="r"><input type="number" step="0.05" min={PHI_MIN} max={PHI_MAX} defaultValue={v} key={"s" + k + resets} onChange={(e) => { const x = num(e.target.value); const c = x === null ? null : clampPhi(x); if (c !== null) upd({ friction: { [k]: c } }); }} onBlur={(e) => { const x = num(e.target.value); const c = x === null ? null : clampPhi(x); e.target.value = String(c ?? v); }} /></td></tr>
           ))}
         </tbody>
       </table>
@@ -315,7 +316,7 @@ function NormsEditor() {
         </tbody>
       </table>
       <p className="hint">
-        {tr("Значения условные. Пропускную способность, коэффициенты покрытия и пороги задают транспортники по нормативам. Изменения сразу видны в таблице, на карте «Загрузка Z» и в свойствах дороги, и запоминаются до следующего запуска.")}</p>
+        {tr("Значения условные. Коэффициент сцепления φ от 0,1 (лед) до 1, для сухого асфальта 0,8: при нем скорость не снижается, при меньшем V своб = V max · √(φ / 0,8). Свое φ можно задать и отдельной дороге (панель дороги). Пропускную способность, коэффициенты сцепления и пороги задают транспортники по нормативам. Изменения сразу видны в таблице, на карте «Загрузка Z» и в свойствах дороги, и запоминаются до следующего запуска.")}</p>
       <div className="chips"><button disabled={isDefault} onClick={() => { window.clearTimeout(timer.current); setNorms(DEFAULT_NORMS); setResets(resets + 1); }}>{tr("Сбросить к стандартным")}</button></div>
     </div>
   );

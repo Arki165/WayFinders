@@ -579,7 +579,8 @@ export function deleteNode(nodeId: number) {
   ed().run(tr("Удаление узла"), ws, [nodeId], () => {
     for (const id of ws) {
       const w = d.ways.get(id)!;
-      w.nodeIds = w.nodeIds.filter((x) => x !== nodeId);
+      // без узла соседи могут оказаться рядом одинаковыми (A, узел, A): повтор подряд - ребро нулевой длины, убираем
+      w.nodeIds = w.nodeIds.filter((x) => x !== nodeId).filter((x, i, a) => i === 0 || x !== a[i - 1]);
       if (w.nodeIds.length < 2) d.ways.delete(id);
     }
     d.nodes.delete(nodeId);

@@ -6,7 +6,7 @@ import { wayLengthM } from "./geo";
 // Нормативы, которые можно менять в программе (значения условные, уточняют транспортники)
 export interface Norms {
   laneCapacity: Record<string, number>; // пропускная способность одной полосы, авт/ч
-  surfaceK: Record<string, number>; // коэффициент скорости по покрытию
+  friction: Record<string, number>; // коэффициент сцепления φ по покрытию, от 0,1 до 1
   z1: number; // порог "умеренно"
   z2: number; // порог "загружено"
   z3: number; // порог "перегружено"
@@ -14,7 +14,7 @@ export interface Norms {
 
 export const DEFAULT_NORMS: Norms = {
   laneCapacity: { motorway: 1800, trunk: 1500, primary: 900, secondary: 800, tertiary: 700, unclassified: 550, residential: 500, living_street: 300, service: 300, link: 700 },
-  surfaceK: Object.fromEntries(Object.entries(SURFACES).map(([k, v]) => [k, v.k])),
+  friction: Object.fromEntries(Object.entries(SURFACES).map(([k, v]) => [k, v.k])),
   z1: 0.5,
   z2: 0.7,
   z3: 0.9,
@@ -30,7 +30,8 @@ export function loadNorms(): Norms {
       ...DEFAULT_NORMS,
       ...v,
       laneCapacity: { ...DEFAULT_NORMS.laneCapacity, ...v.laneCapacity },
-      surfaceK: { ...DEFAULT_NORMS.surfaceK, ...v.surfaceK },
+      // старые сохраненные «коэффициенты скорости» (surfaceK) не берем: это другая величина
+      friction: Object.fromEntries(Object.entries({ ...DEFAULT_NORMS.friction, ...v.friction }).map(([k, x]) => [k, clampPhi(Number(x)) ?? DEFAULT_NORMS.friction[k] ?? PHI_REF])),
     };
   } catch {
     return DEFAULT_NORMS;
@@ -43,10 +44,31 @@ export function saveNorms(n: Norms) {
 // Замеры храним в тегах дороги, чтобы они сохранялись в .osm вместе с правками
 export const MEASURE_KEYS = { volume: "wayfinders:volume", time: "wayfinders:travel_time" };
 
+// ---------- коэффициент сцепления ----------
+// φ берется из тега дороги wayfinders:friction (если задан у дороги), иначе из нормативов по покрытию.
+// Скорость свободного движения снижается пропорционально корню из φ: допустимая скорость по условию
+// сцепления (торможение, поворот) растет как √φ. Опорное значение - сухой асфальт φ₀ = 0,8: при нем скорость не снижается.
+export const FRICTION_KEY = "wayfinders:friction";
+export const PHI_MIN = 0.1, PHI_MAX = 1, PHI_REF = 0.8;
+// число в пределах 0,1-1 (больше и меньше - к границе), не число - null
+export function clampPhi(x: number): number | null {
+  if (!Number.isFinite(x)) return null;
+  return Math.round(Math.min(PHI_MAX, Math.max(PHI_MIN, x)) * 1000) / 1000;
+}
+export function frictionOf(w: OsmWay, norms: Norms): { phi: number; from: "road" | "surface" | "default" } {
+  const own = w.tags[FRICTION_KEY];
+  if (own !== undefined && own.trim() !== "") { const x = clampPhi(Number(own.replace(",", "."))); if (x !== null) return { phi: x, from: "road" }; }
+  const s = w.tags.surface;
+  const v = s ? norms.friction[s] ?? norms.friction[SURFACE_ALIAS[s]] : undefined;
+  return v !== undefined ? { phi: v, from: "surface" } : { phi: PHI_REF, from: "default" };
+}
+export const speedFactor = (phi: number) => Math.min(1, Math.sqrt(phi / PHI_REF));
+
 export interface CalcResult {
   L: number; // длина, км
   Vmax: number; // разрешенная скорость, км/ч
-  kSurface: number; // коэффициент покрытия
+  phi: number; // коэффициент сцепления φ
+  kSurface: number; // снижение скорости по сцеплению, √(φ / φ₀), не больше 1
   Vfree: number; // скорость свободного движения, км/ч
   Tfree: number; // время свободного проезда, мин
   lanes: number;
@@ -66,18 +88,17 @@ export function capacityPerLane(w: OsmWay, norms: Norms): number {
   return norms.laneCapacity[h] ?? norms.laneCapacity.service;
 }
 
+// Коэффициент снижения скорости по сцеплению (1 - не снижается)
 export function surfaceK(w: OsmWay, norms: Norms): number {
-  const s = w.tags.surface;
-  if (!s) return 1;
-  // старые значения из файлов (грунтовка, без покрытия) считаем как похожее покрытие
-  return norms.surfaceK[s] ?? norms.surfaceK[SURFACE_ALIAS[s]] ?? 1;
+  return speedFactor(frictionOf(w, norms).phi);
 }
 
 export function calcWay(data: OsmData, w: OsmWay, norms: Norms): CalcResult {
   const L = wayLengthM(data, w) / 1000;
   const Vmax = maxSpeed(w);
-  const kSurface = surfaceK(w, norms);
-  // Скорость свободного движения учитывает покрытие: по грунтовке быстро не поедешь
+  const phi = frictionOf(w, norms).phi;
+  const kSurface = speedFactor(phi);
+  // Скорость свободного движения учитывает сцепление: по грунту, песку или льду быстро не поедешь
   const Vfree = Vmax * kSurface;
   // T своб считается отдельно, только из длины и свободной скорости
   const Tfree = Vfree > 0 ? (L / Vfree) * 60 : 0;
@@ -93,7 +114,7 @@ export function calcWay(data: OsmData, w: OsmWay, norms: Norms): CalcResult {
   const Tdelay = Tfact !== null ? Tfact - Tfree : null;
   const D = Tdelay !== null && Tfree > 0 ? (Tdelay / Tfree) * 100 : null;
 
-  return { L, Vmax, kSurface, Vfree, Tfree, lanes, P, N, Tfact, Z, Vavg, q, Tdelay, D };
+  return { L, Vmax, phi, kSurface, Vfree, Tfree, lanes, P, N, Tfact, Z, Vavg, q, Tdelay, D };
 }
 
 export function zLevel(z: number, norms: Norms): 0 | 1 | 2 | 3 {

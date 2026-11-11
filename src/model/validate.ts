@@ -120,6 +120,9 @@ export function badValues(t: Record<string, string>): string[] {
   }
   if (t.oneway !== undefined && !["yes", "no", "-1", "1", "true", "false", "reversible", "alternating"].includes(t.oneway)) bad.push(`oneway=${t.oneway}`);
   if (t.layer !== undefined && !/^-?\d$/.test(t.layer)) bad.push(`layer=${t.layer}`);
+  // свой коэффициент сцепления: число от 0,1 до 1
+  const phi = t["wayfinders:friction"];
+  if (phi !== undefined && !(Number(phi) >= 0.1 && Number(phi) <= 1)) bad.push(`wayfinders:friction=${phi}`);
   // полосы по направлениям в сумме больше общего числа
   if (int(t.lanes ?? "") && int(t["lanes:forward"] ?? "") && int(t["lanes:backward"] ?? "") && Number(t["lanes:forward"]) + Number(t["lanes:backward"]) > Number(t.lanes)) bad.push(`lanes=${t.lanes} < ${t["lanes:forward"]} + ${t["lanes:backward"]}`);
   return bad;
