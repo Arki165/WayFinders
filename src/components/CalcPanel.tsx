@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Chart, registerables } from "chart.js";
-import { useEditor, setWayTags } from "../model/store";
+import { useEditor, setWayTags, setMeasures } from "../model/store";
+import { readFcd, fcdMeasures } from "../model/fcd";
 import { calcWay, clampPhi, DEFAULT_NORMS, MEASURE_KEYS, PHI_MAX, PHI_MIN, PHI_REF, zLevel, Z_COLORS, Z_TEXT, type CalcResult, type Norms } from "../model/calc";
 import { SURFACES, ROAD_CLASSES, wayName, isDrivable } from "../model/roads";
 import { saveCsv, savePdf, savePng, saveXlsx, toCsv } from "../model/exporting";
@@ -152,6 +153,23 @@ export default function CalcPanel() {
     if (v.trim() === "") delete tags[key]; else tags[key] = String(Number(v.replace(",", ".")));
     setWayTags(id, tags, key === MEASURE_KEYS.volume ? tr("Замер N") : tr("Замер T факт"));
   };
+  // Результаты SUMO: выбираем fcd.xml прогона, записываем N и T факт в дороги и добавляем их в таблицу
+  const loadFcd = () => {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = ".xml";
+    inp.onchange = async () => {
+      const f = inp.files?.[0];
+      if (!f) return;
+      const toast = useEditor.getState().toast;
+      const list = fcdMeasures(data, readFcd(await f.text()));
+      if (!list.length) return toast(tr("В файле нет машин на дорогах этого графа. Нужен fcd.xml прогона этого же графа"));
+      setMeasures(list, tr("Замеры из прогона SUMO"));
+      setAnalysis([...new Set([...analysis, ...list.map((m) => m.id)])]);
+      toast(tr("Из прогона SUMO заполнено дорог: {0}", list.length));
+    };
+    inp.click();
+  };
   // Таблица расчета для выгрузки: заголовок и строки (одна и та же для CSV, Excel и PDF)
   const TABLE_HEAD = ["way id", tr("Дорога"), tr("L, км"), tr("V max, км/ч"), tr("φ сцепления"), tr("k скорости"), tr("V своб, км/ч"), tr("T своб, мин"), tr("Полос"), tr("P, авт/ч"), tr("N, авт/ч"), tr("T факт, мин"), "Z", tr("Загрузка"), tr("V ср, км/ч"), tr("q, авт/км"), tr("T зад, мин"), "D, %"];
   const tableRows = (): Cell[][] => {
@@ -204,6 +222,7 @@ export default function CalcPanel() {
           {selWay && isDrivable(selWay) && !analysis.includes(selWay.id) && <button className="on" onClick={() => setAnalysis([...analysis, selWay.id])}><Icon name="plus" size={14} />{tr("Выделенная:")}{" "}{wayName(selWay)}</button>}
           {selMany.length > 0 && <button className="on" onClick={() => setAnalysis([...analysis, ...selMany])}><Icon name="plus" size={14} />{tr("Выделенные:")}{" "}{selMany.length}</button>}
           <button onClick={addMajor}><Icon name="plus" size={14} />{tr("Все крупные улицы")}</button>
+          <button onClick={loadFcd} title={tr("Выберите fcd.xml с сервера проверки. N и T факт по каждой дороге посчитаются по движению машин в SUMO")}><Icon name="folder" size={14} />{tr("Из прогона SUMO...")}</button>
           {rows.length > 0 && <button onClick={() => setAnalysis([])}>{tr("Очистить")}</button>}
           <button onClick={exportCsv} disabled={!rows.length} title={tr("Таблица для Excel и других программ")}><Icon name="download" size={14} />CSV</button>
           <button onClick={exportXlsx} disabled={!rows.length} title={tr("Таблица Excel: лист «Расчет» и лист «График» с числами графика")}><Icon name="download" size={14} />Excel</button>

@@ -242,6 +242,17 @@ export function setWayTags(wayId: number, tags: Tags, label: string) {
   ed().run(label, [wayId], [], () => { const w = d.ways.get(wayId); if (w) w.tags = { ...tags }; });
 }
 
+// Замеры N и T факт сразу по многим дорогам (загрузка результатов SUMO), одной правкой для отмены
+export function setMeasures(list: { id: number; N: number; T: number }[], label: string) {
+  const d = ed().data!;
+  ed().run(label, list.map((m) => m.id), [], () => {
+    for (const m of list) {
+      const w = d.ways.get(m.id);
+      if (w) w.tags = { ...w.tags, "wayfinders:volume": String(m.N), "wayfinders:travel_time": String(m.T) };
+    }
+  });
+}
+
 export function setNodeTags(nodeId: number, tags: Tags, label: string) {
   const d = ed().data!;
   ed().run(label, [], [nodeId], () => { const n = d.nodes.get(nodeId); if (n) n.tags = { ...tags }; });
