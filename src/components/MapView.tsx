@@ -287,8 +287,11 @@ function roadPath(data: OsmData, w: OsmWay, br?: Bridges): P3[] {
   return out;
 }
 
-// Значки светофоров, переходов и остановок - с той же линейки 100 м, дальше светофоры точками
+// Значки переходов и остановок - с той же линейки 100 м
 const ICONS_ZOOM = 14.5;
+// Светофоры значком с масштаба около 500 м (до линейки 100 м - уменьшенным), дальше не рисуются:
+// при отдалении красные точки сливались и закрывали дороги, а значок там не разглядеть
+const SIGNALS_ZOOM = 13;
 
 // Полосы и разметку рисуем с приближения, где линейка масштаба показывает 100 м (на широте Иркутска 14,55-15,55)
 const LANES_ZOOM = 14.5;
@@ -1036,7 +1039,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const crossLines = city && show.crossings ? layersData.crossings : [];
     const transitData = lists.transit;
     const zebraData = city && show.crossings && zoom >= 15.6 ? layersData.zebra : [];
-    const signalsData = city && show.signals ? layersData.signals : [];
+    const signalsData = city && show.signals && zoom >= SIGNALS_ZOOM ? layersData.signals : [];
     const poiData = lists.pois;
     const metroData = show.metro ? layersData.metro : [];
     const stationNames = lists.stationNames;
@@ -1136,10 +1139,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const pointLayers = [
         new ScatterplotLayer({ id: "walk-zone", data: stopNode && walkR ? [{ pos: [stopNode.lon, stopNode.lat], r: walkR }] : [], getPosition: (d) => d.pos as [number, number], getRadius: (d) => d.r, radiusUnits: "meters", filled: true, stroked: true, getFillColor: [31, 111, 209, dark ? 40 : 34], getLineColor: [31, 111, 209, 200], getLineWidth: 2, lineWidthUnits: "pixels", parameters: flat }),
         new ScatterplotLayer<Pt>({ id: "nodes", data: nodes, getPosition: (d) => d.pos, getRadius: (d) => (d.id === selNode ? 6 : 3.5), radiusUnits: "pixels", getFillColor: (d) => (d.id === selNode ? [31, 111, 209, 255] : [255, 255, 255, 255]), getLineColor: [31, 111, 209, 255], stroked: true, lineWidthMinPixels: 1.5, pickable: true, updateTriggers: { getRadius: selNode, getFillColor: selNode } }),
-        // светофоры: с линейки 100 м значком, дальше красной точкой
-        iconsOn
-          ? new IconLayer<Pt>({ id: "signal-icons", data: iconAtlas ? signalsData : [], getPosition: (d) => d.pos, iconAtlas: iconAtlas!, iconMapping: ICON_MAPPING_2X, getIcon: () => "signal", getSize: zoom >= 16.5 ? 30 : 24, sizeUnits: "pixels", pickable: true, updateTriggers: { getSize: zoom >= 16.5 } })
-          : new ScatterplotLayer<Pt>({ id: "signals", data: signalsData, getPosition: (d) => d.pos, getRadius: 6, radiusUnits: "pixels", getFillColor: [229, 72, 63, 255], getLineColor: [255, 255, 255, 255], stroked: true, lineWidthMinPixels: 2, pickable: true }),
+        // светофоры значком: крупнее при приближении, мельче до линейки 100 м, при сильном отдалении не рисуются (SIGNALS_ZOOM)
+        new IconLayer<Pt>({ id: "signal-icons", data: iconAtlas ? signalsData : [], getPosition: (d) => d.pos, iconAtlas: iconAtlas!, iconMapping: ICON_MAPPING_2X, getIcon: () => "signal", getSize: zoom >= 16.5 ? 30 : iconsOn ? 24 : 16, sizeUnits: "pixels", pickable: true, updateTriggers: { getSize: zoom >= 16.5 ? 2 : iconsOn ? 1 : 0 } }),
         // переходы, остановки, станции и входы в метро
         new IconLayer<Poi>({ id: "pois", data: iconAtlas ? poiData : [], getPosition: (d) => d.pos, iconAtlas: iconAtlas!, iconMapping: ICON_MAPPING_2X, getIcon: (d) => d.kind, getSize: (d) => (d.kind === "entrance" ? 16 : d.kind === "metro" ? 26 : zoom >= 16.5 ? 26 : 20), sizeUnits: "pixels", pickable: true, updateTriggers: { getSize: zoom >= 16.5 } }),
         new TextLayer<Poi>({ id: "metro-names", data: stationNames, getPosition: (d) => d.pos, getText: (d) => d.name, getSize: 13, getPixelOffset: [0, 20], getColor: dark ? [235, 238, 242, 255] : [30, 30, 30, 255], outlineWidth: 3, outlineColor: dark ? [22, 23, 27, 255] : [255, 255, 255, 255], fontSettings: { sdf: true }, characterSet: "auto", fontWeight: 700, updateTriggers: { getColor: dark } }),
