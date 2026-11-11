@@ -3,7 +3,8 @@ import { useEditor, mergeMap, okToReplace } from "../model/store";
 import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
 import type { OsmData } from "../osm/types";
-import { saveOsmText } from "../model/exporting";
+import { saveOsmText, saveXmlText } from "../model/exporting";
+import { sumoSignals } from "../model/sumo";
 import Icon from "./Icon";
 import { tr } from "../i18n";
 
@@ -358,6 +359,27 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Фазы светофоров для SUMO: выбираем сеть прошлого прогона и пишем по ней файл с нашим временем фаз
+  function exportSignals() {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = ".xml";
+    inp.onchange = async () => {
+      const f = inp.files?.[0];
+      if (!f) return;
+      const toast = useEditor.getState().toast;
+      try {
+        const r = sumoSignals(data, await f.text());
+        if (!r.done) return toast(r.noTime ? tr("В сети {0} светофоров, но ни у одного в редакторе не задано время фаз", r.noTime) : tr("В этом файле нет светофоров из открытого графа. Нужен network.net.xml из scenario.zip прогона"));
+        const p = await saveXmlText("additional.add.xml", r.xml);
+        if (p) toast(tr("Фазы записаны для {0} светофоров, без времени осталось {1}. Файл: {2}", r.done, r.noTime, p));
+      } catch (e) {
+        toast(tr("Не удалось записать фазы: ") + (e instanceof Error ? e.message : e));
+      }
+    };
+    inp.click();
+  }
+
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog">
@@ -372,6 +394,11 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
         <label className="field">{tr("Имя файла")}<input value={name} onChange={(e) => setName(e.target.value)} />
           <span className="hint">{tr("Сервер проверки принимает файл с именем команды: команда team1 отправляет team1.osm.")}</span>
         </label>
+        {/* время фаз светофоров SUMO из OSM не читает: отдаем его отдельным файлом по сети прошлого прогона */}
+        <div className="field">{tr("Для SUMO")}
+          <button onClick={exportSignals} title={tr("Выберите network.net.xml из scenario.zip прошлого прогона. Программа запишет additional.add.xml: схема сигналов из сети, время фаз из редактора")}>{tr("Фазы светофоров...")}</button>
+          <span className="hint">{tr("Время фаз из редактора для сервера проверки (поле additional.add.xml). Нужен network.net.xml из scenario.zip прошлого прогона того же графа.")}</span>
+        </div>
         <div className="foot">
           {crit > 0 && <button onClick={() => { onClose(); setTab(tr("Откройте вкладку «Ошибки» справа")); }}>{tr("Сначала исправить")}</button>}
           {filePath && window.api && <button onClick={() => save(true)}>{tr("Перезаписать")}{" "}{fileName}</button>}

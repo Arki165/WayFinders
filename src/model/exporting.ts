@@ -33,6 +33,13 @@ export async function saveOsmText(name: string, text: string) {
   return name;
 }
 
+// Файл XML для симулятора (например, фазы светофоров для SUMO)
+export async function saveXmlText(name: string, text: string) {
+  if (window.api) return window.api.saveText(name, text, [{ name: "XML", extensions: ["xml"] }]);
+  browserDownload(name, new Blob([text], { type: "application/xml" }));
+  return name;
+}
+
 export async function savePng(name: string, canvas: HTMLCanvasElement) {
   const url = canvas.toDataURL("image/png");
   if (window.api) {

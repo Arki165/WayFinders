@@ -900,4 +900,12 @@ export const EN: Record<string, string> = {
   "Граф": "Graph",
   "Назад": "Back",
   "Дальше": "Next",
+  "В сети {0} светофоров, но ни у одного в редакторе не задано время фаз": "The network has {0} signals, but none of them has phase times set in the editor",
+  "В этом файле нет светофоров из открытого графа. Нужен network.net.xml из scenario.zip прогона": "This file has no signals from the open graph. Use network.net.xml from the run's scenario.zip",
+  "Фазы записаны для {0} светофоров, без времени осталось {1}. Файл: {2}": "Phases written for {0} signals, {1} left without times. File: {2}",
+  "Не удалось записать фазы: ": "Could not write the phases: ",
+  "Для SUMO": "For SUMO",
+  "Выберите network.net.xml из scenario.zip прошлого прогона. Программа запишет additional.add.xml: схема сигналов из сети, время фаз из редактора": "Pick network.net.xml from the previous run's scenario.zip. The program writes additional.add.xml: signal layout from the network, phase times from the editor",
+  "Фазы светофоров...": "Signal phases...",
+  "Время фаз из редактора для сервера проверки (поле additional.add.xml). Нужен network.net.xml из scenario.zip прошлого прогона того же графа.": "Phase times from the editor for the check server (the additional.add.xml field). Needs network.net.xml from scenario.zip of a previous run of the same graph.",
 };
