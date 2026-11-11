@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Wayfinder: высоты мостов, 5 м на уровень, рельеф не учитывается -->
+<elevation>
+<road way="44961456" height="5" ramp="40" supports="true"/>
+<road way="81608266" height="5" ramp="40" supports="true"/> <!-- улица Лермонтова -->
+<road way="107677816" height="5" ramp="40" supports="true"/>
+<road way="258993610" height="5" ramp="40" supports="true"/>
+<road way="258993611" height="5" ramp="40" supports="true"/>
+<road way="258993612" height="5" ramp="40" supports="true"/>
+<road way="258993613" height="5" ramp="40" supports="true"/>
+<road way="1494549790" height="5" ramp="40" supports="true"/>
+<road way="1502531041" height="5" ramp="40" supports="true"/>
+<road way="1502531045" height="5" ramp="40" supports="true"/>
+</elevation>

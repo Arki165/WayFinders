@@ -61,3 +61,24 @@ export function sumoSignals(data: OsmData, netXml: string): SumoSignals {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Wayfinder: время фаз светофоров из редактора -->\n<additional>\n${out.join("\n")}\n</additional>\n`;
   return { xml, done, noTime, missing };
 }
+
+// Высоты мостов для Webots (поле elevation.xml на сервере проверки).
+// Рельеф не учитываем: все дороги на нуле, поднимаем только мосты.
+// Высота моста = 5 м на каждый уровень layer, плавный въезд 40 м, под мостом ставятся опоры.
+export const BRIDGE_STEP_M = 5;
+export const BRIDGE_RAMP_M = 40;
+
+export function bridgeElevation(data: OsmData): { xml: string; count: number } {
+  const out: string[] = [];
+  for (const w of data.ways.values()) {
+    const t = w.tags;
+    if (!t.highway && !t.railway) continue; // только дороги и пути
+    if (!t.bridge || t.bridge === "no") continue;
+    const layer = Number(t.layer) || 1; // мост без layer считаем первым уровнем
+    if (layer <= 0) continue;
+    const name = t.name ? ` <!-- ${t.name.replace(/--/g, "-")} -->` : "";
+    out.push(`<road way="${w.id}" height="${layer * BRIDGE_STEP_M}" ramp="${BRIDGE_RAMP_M}" supports="true"/>${name}`);
+  }
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Wayfinder: высоты мостов, ${BRIDGE_STEP_M} м на уровень, рельеф не учитывается -->\n<elevation>\n${out.join("\n")}\n</elevation>\n`;
+  return { xml, count: out.length };
+}

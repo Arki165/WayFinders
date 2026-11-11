@@ -4,7 +4,7 @@ import { parseOsm } from "../osm/parse";
 import { writeOsm } from "../osm/write";
 import type { OsmData } from "../osm/types";
 import { saveOsmText, saveXmlText } from "../model/exporting";
-import { sumoSignals } from "../model/sumo";
+import { sumoSignals, bridgeElevation } from "../model/sumo";
 import Icon from "./Icon";
 import { tr } from "../i18n";
 
@@ -380,6 +380,19 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
     inp.click();
   }
 
+  // Высоты мостов для Webots: файл elevation.xml, рельеф не учитываем
+  async function exportElevation() {
+    const toast = useEditor.getState().toast;
+    const r = bridgeElevation(data);
+    if (!r.count) return toast(tr("В графе нет мостов"));
+    try {
+      const p = await saveXmlText("elevation.xml", r.xml);
+      if (p) toast(tr("Высоты записаны для {0} мостов. Файл: {1}", r.count, p));
+    } catch (e) {
+      toast(tr("Не удалось записать высоты: ") + (e instanceof Error ? e.message : e));
+    }
+  }
+
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog">
@@ -398,6 +411,10 @@ export function SaveDialog({ onClose }: { onClose: () => void }) {
         <div className="field">{tr("Для SUMO")}
           <button onClick={exportSignals} title={tr("Выберите network.net.xml из scenario.zip прошлого прогона. Программа запишет additional.add.xml: схема сигналов из сети, время фаз из редактора")}>{tr("Фазы светофоров...")}</button>
           <span className="hint">{tr("Время фаз из редактора для сервера проверки (поле additional.add.xml). Нужен network.net.xml из scenario.zip прошлого прогона того же графа.")}</span>
+        </div>
+        <div className="field">{tr("Для Webots")}
+          <button onClick={exportElevation} title={tr("Мосты поднимаются на 5 м за каждый уровень layer, с плавным въездом и опорами")}>{tr("Высоты мостов...")}</button>
+          <span className="hint">{tr("Файл elevation.xml для сервера проверки. Рельеф не учитывается, поднимаются только мосты.")}</span>
         </div>
         <div className="foot">
           {crit > 0 && <button onClick={() => { onClose(); setTab(tr("Откройте вкладку «Ошибки» справа")); }}>{tr("Сначала исправить")}</button>}
