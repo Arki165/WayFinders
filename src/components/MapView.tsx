@@ -19,7 +19,7 @@ const poiKindOf = (n: Parameters<typeof poiKind>[0] | undefined) => (n ? poiKind
 
 const POI_TEXT: Record<PoiKind, string> = { get crossing() { return tr("Пешеходный переход"); }, get bus() { return tr("Автобусная остановка"); }, get tram() { return tr("Трамвайная остановка"); }, get train() { return tr("Ж/д станция или платформа"); }, get metro() { return tr("Станция метро"); }, get entrance() { return tr("Вход в метро"); } };
 import { ICON_MAPPING_2X, loadIconAtlas } from "./mapIcons";
-import { getRoute, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
+import { getRoute, routeBridges, toggleRouteStop, toggleRouteWay, useRoute } from "../model/routes";
 import Icon from "./Icon";
 import LayersPanel, { loadLayers, saveLayers, type Level, type LayerShow } from "./LayersPanel";
 import { changedRoads, CHANGE_COLORS, CHANGE_TEXT, type ChangeKind, type ChangedRoad } from "../model/changes";
@@ -947,6 +947,8 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
     const r = data && routeId !== null ? getRoute(data, routeId) : null;
     if (!r || !data) return null;
     const paths = r.ways.map((id) => data.ways.get(id)!.nodeIds.map((n) => data.nodes.get(n)).filter(Boolean).map((n) => [n!.lon, n!.lat] as [number, number]));
+    // разрывы между соседними дорогами маршрута закрываем кратчайшим путем по дорогам
+    paths.push(...routeBridges(data, r));
     const stops = r.stops.map((id, i) => { const n = data.nodes.get(id)!; return { pos: [n.lon, n.lat] as [number, number], num: String(i + 1) }; });
     return { color: r.color, paths, stops };
   }, [data, version, routeId]); // eslint-disable-line react-hooks/exhaustive-deps

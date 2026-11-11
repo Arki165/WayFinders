@@ -182,3 +182,58 @@ export function getRoute(data: OsmData, id: number): Route | null {
   const r = data.relations.get(id);
   return r ? toRoute(data, r) : null;
 }
+
+// ---------- разрывы маршрута на карте ----------
+// В OpenStreetMap маршрут иногда записан с пропуском: после правки дороги в него забыли добавить короткий кусок.
+// Тогда две соседние дороги маршрута не имеют общего узла, и линия на карте рвется.
+// Такой разрыв до BRIDGE_MAX_M метров закрываем кратчайшим путем по дорогам (для трамвая - по путям).
+// Это только для показа: сам маршрут в файле не меняется.
+const BRIDGE_MAX_M = 400;
+
+export function routeBridges(data: OsmData, r: Route): [number, number][][] {
+  const ways = r.ways.map((id) => data.ways.get(id)).filter((w): w is NonNullable<typeof w> => !!w && w.nodeIds.length > 1);
+  // сначала ищем разрывы: чаще всего их нет, и строить граф не нужно
+  const gaps: [number[], Set<number>][] = [];
+  for (let i = 1; i < ways.length; i++) {
+    const a = ways[i - 1], b = ways[i];
+    if (a.nodeIds.some((id) => b.nodeIds.includes(id))) continue;
+    gaps.push([[a.nodeIds[0], a.nodeIds[a.nodeIds.length - 1]], new Set([b.nodeIds[0], b.nodeIds[b.nodeIds.length - 1]])]);
+  }
+  if (!gaps.length) return [];
+  // граф: узел -> соседи с расстоянием. Трамвай идет по путям, остальные по дорогам
+  const fits = (t: Record<string, string>) => (r.kind === "tram" ? t.railway === "tram" : !!t.highway && t.area !== "yes" && !/^(footway|path|steps|cycleway|pedestrian)$/.test(t.highway));
+  const adj = new Map<number, [number, number][]>();
+  const link = (x: number, y: number, m: number) => { const l = adj.get(x); if (l) l.push([y, m]); else adj.set(x, [[y, m]]); };
+  for (const w of data.ways.values()) {
+    if (!fits(w.tags)) continue;
+    for (let i = 1; i < w.nodeIds.length; i++) {
+      const a = data.nodes.get(w.nodeIds[i - 1]), b = data.nodes.get(w.nodeIds[i]);
+      if (!a || !b) continue;
+      const m = distM(a.lat, a.lon, b.lat, b.lon);
+      link(a.id, b.id, m); link(b.id, a.id, m);
+    }
+  }
+  const out: [number, number][][] = [];
+  for (const [from, to] of gaps) {
+    // поиск кратчайшего пути от концов первой дороги до концов второй, не дальше BRIDGE_MAX_M
+    const dist = new Map<number, number>(from.map((id) => [id, 0])), prev = new Map<number, number>();
+    const open = new Set(from);
+    let hit: number | null = null;
+    while (open.size) {
+      let cur = -1, best = Infinity;
+      for (const id of open) { const v = dist.get(id)!; if (v < best) { best = v; cur = id; } }
+      open.delete(cur);
+      if (to.has(cur)) { hit = cur; break; }
+      for (const [nb, m] of adj.get(cur) ?? []) {
+        const v = best + m;
+        if (v > BRIDGE_MAX_M || v >= (dist.get(nb) ?? Infinity)) continue;
+        dist.set(nb, v); prev.set(nb, cur); open.add(nb);
+      }
+    }
+    if (hit === null) continue;
+    const path: [number, number][] = [];
+    for (let id: number | undefined = hit; id !== undefined; id = prev.get(id)) { const n = data.nodes.get(id)!; path.push([n.lon, n.lat]); }
+    if (path.length > 1) out.push(path);
+  }
+  return out;
+}
