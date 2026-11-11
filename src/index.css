@@ -505,7 +505,19 @@ input.title-input:hover, input.title-input:focus { border-color: var(--line); ba
 .app-menu-list .am-item kbd { margin-left: auto; }
 
 /* руководство пользователя */
-.dialog.guide { width: min(560px, 100%); }
+.dialog.guide { width: min(820px, 100%); height: min(600px, 100%); grid-template-rows: auto minmax(0, 1fr) auto; }
+.guide-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; min-height: 0; }
+.guide-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.guide-nav button { justify-content: flex-start; text-align: left; border-color: transparent; background: none; white-space: normal; height: auto; min-height: 30px; padding: 5px 9px; }
+.guide-nav button:hover { background: var(--panel-3); }
+.guide-nav button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.guide-text { overflow-y: auto; padding-right: 6px; line-height: 1.5; }
+.guide-text h3 { margin: 2px 0 8px; font-size: 15px; }
+.guide-text ul { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 6px; }
+.guide-text table { border-collapse: collapse; width: 100%; margin: 0 0 10px; }
+.guide-text td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.guide-text td:first-child { white-space: nowrap; width: 1%; }
+@media (max-width: 640px) { .guide-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .guide-nav { flex-direction: row; flex-wrap: wrap; } }
 .guide-head { display: flex; align-items: center; justify-content: space-between; }
 
 /* кнопка «Вернуться к графу» при сильном отдалении карты */
