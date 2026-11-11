@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
+import { useEditor, getOriginal, addWay, type DrawPoint, addBuildingCorner, moveBuildingDone, newId, removeBuildingCorner, lineHitsBuilding, THROUGH_BUILDING, deleteNode, deleteWay, insertNode, joinNodes, joinNodeToWay, moveNodeDone, dropNodeOn, selectSection, setNodeTags, splitWay, toggleWay, unjoinNode } from "../model/store";
 import { drivableNodeSet, isDrivable, isRoadSignal, roadClass } from "../model/roads";
 import { calcWay, zLevel, Z_COLORS, Z_TEXT } from "../model/calc";
 import { distM, tangentArc, turnAngle } from "../model/geo";
@@ -128,6 +128,7 @@ const ARROW_ICON = {
 // Перетаскивание узла: с какого приближения можно и через сколько пикселей начинается
 const DRAG_MIN_ZOOM = 14;
 const DRAG_START_PX = 4;
+const MIN_ZOOM = 1.3; // дальше не отдаляем: на линейке карты около 2000 км
 const MAG_PX = 14; // радиус магнита при рисовании, пиксели
 
 // Видимая область карты [юг, запад, север, восток] для загрузки района из OSM
@@ -315,7 +316,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   const [draw, setDraw] = useState<DrawPoint[]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   // что тащим мышью: узел (id) или здание целиком (bld - его узлы и где они были, origin - точка, где нажали)
-  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] }; corner?: { wayId: number; index: number }; newCorner?: { wayId: number; index: number } } | null>(null);
+  const dragRef = useRef<{ id: number; from: [number, number]; moved: boolean; start: [number, number]; snap?: DrawPoint | null; bld?: { wayId: number; from: Map<number, [number, number]>; origin: [number, number] }; corner?: { wayId: number; index: number }; newCorner?: { wayId: number; index: number } } | null>(null);
 
   const data = useEditor((s) => s.data);
   const original = useEditor((s) => s.original);
@@ -350,7 +351,7 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
   // ---------- создание карты ----------
   useEffect(() => {
     if (!box.current) return;
-    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, maxPitch: 70, doubleClickZoom: false, boxZoom: false, trackResize: false }); // Shift+клик нужен для выделения, рамка приближения его перехватывала
+    const map = new maplibregl.Map({ container: box.current, style: makeStyle(live.current.dark), center: [104.262, 52.262], zoom: 15, minZoom: MIN_ZOOM, maxPitch: 70, doubleClickZoom: false, boxZoom: false, trackResize: false }); // Shift+клик нужен для выделения, рамка приближения его перехватывала
     // Когда тянут край панели, карта подгоняет размер сразу и тут же перерисовывается.
     // Встроенная подгонка ждала следующего кадра: картинка растягивалась и «дрожала как желе».
     const ro = new ResizeObserver(() => { map.resize(); map.redraw(); });
@@ -421,6 +422,41 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
       }
       // курсор над самой дорогой (широкая дорога вблизи): точка встает на ее ось, как бы далеко от оси ни был клик
       return on ?? free;
+    };
+
+    // Магнит при перетаскивании узла дороги: ближний узел другой дороги или линия другой дороги.
+    // Соседей по своей дороге пропускаем: иначе дорога схлопнулась бы сама в себя.
+    const snapDrag = (nodeId: number, x: number, y: number, lat: number, lon: number): DrawPoint | null => {
+      const d = useEditor.getState().data;
+      if (!d || !live.current.magnet) return null;
+      const own = [...d.ways.values()].filter((w) => w.nodeIds.includes(nodeId));
+      if (!own.some(isDrivable)) return null;
+      const skip = new Set(own.flatMap((w) => w.nodeIds));
+      const c = map.unproject([x + MAG_PX, y + MAG_PX]);
+      const dLon = Math.abs(c.lng - lon), dLat = Math.abs(c.lat - lat);
+      const near = (n: { lat: number; lon: number }) => Math.abs(n.lon - lon) <= dLon && Math.abs(n.lat - lat) <= dLat;
+      let best: DrawPoint | null = null, bestPx = MAG_PX;
+      let on: DrawPoint | null = null, onPx = MAG_PX * 0.7;
+      for (const w of d.ways.values()) {
+        if (!isDrivable(w) || own.includes(w)) continue;
+        for (let i = 0; i < w.nodeIds.length; i++) {
+          const id = w.nodeIds[i], b = d.nodes.get(id);
+          if (!b) continue;
+          if (!skip.has(id) && near(b)) {
+            const p = map.project([b.lon, b.lat]), px = Math.hypot(p.x - x, p.y - y);
+            if (px < bestPx) { bestPx = px; best = { id, lat: b.lat, lon: b.lon }; }
+          }
+          const a = i > 0 ? d.nodes.get(w.nodeIds[i - 1]) : undefined;
+          // отрезок проверяем, только если курсор внутри его рамки с запасом
+          if (!a || lon < Math.min(a.lon, b.lon) - dLon || lon > Math.max(a.lon, b.lon) + dLon || lat < Math.min(a.lat, b.lat) - dLat || lat > Math.max(a.lat, b.lat) + dLat) continue;
+          const pa = map.project([a.lon, a.lat]), pb = map.project([b.lon, b.lat]);
+          const vx = pb.x - pa.x, vy = pb.y - pa.y, L2 = vx * vx + vy * vy || 1;
+          const t = Math.max(0, Math.min(1, ((x - pa.x) * vx + (y - pa.y) * vy) / L2));
+          const px = Math.hypot(pa.x + vx * t - x, pa.y + vy * t - y);
+          if (px < onPx) { onPx = px; on = { id: null, lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, onWay: w.id }; }
+        }
+      }
+      return best ?? on;
     };
 
     map.on("mousedown", (e) => {
@@ -520,7 +556,14 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
           return;
         }
         const n = st.data.nodes.get(dr.id);
-        if (n) { n.lat = e.lngLat.lat; n.lon = e.lngLat.lng; dr.moved = true; st.bump(); }
+        if (n) {
+          // магнит: узел встает на ближний узел или линию другой дороги, кружок показывает куда
+          const sp = dr.newCorner ? null : snapDrag(dr.id, e.point.x, e.point.y, e.lngLat.lat, e.lngLat.lng);
+          dr.snap = sp;
+          setSnapMark(sp);
+          n.lat = sp ? sp.lat : e.lngLat.lat; n.lon = sp ? sp.lon : e.lngLat.lng;
+          dr.moved = true; st.bump();
+        }
         return;
       }
       if (live.current.tool === "draw") {
@@ -545,7 +588,9 @@ export default function MapView({ basemap, view3d, heat, showBuildings, showChan
         }
         return;
       }
+      setSnapMark(null);
       if (dr.moved && dr.bld) moveBuildingDone(dr.bld.wayId, dr.bld.from);
+      else if (dr.moved && dr.snap) dropNodeOn(dr.id, dr.from, dr.snap);
       else if (dr.moved) moveNodeDone(dr.id, dr.from);
     });
 
@@ -1100,7 +1145,7 @@ new PathLayer<LaneLink>({ id: "lane-links", data: links, getPath: (d) => d.path,
         new ScatterplotLayer({ id: "draw-pts", data: draw, getPosition: (d) => [d.lon, d.lat], getRadius: 4, radiusUnits: "pixels", getFillColor: [31, 111, 209, 255] }),
         new TextLayer<{ pos: [number, number]; text: string }>({ id: "draw-label", data: drawLabel, getPosition: (d) => d.pos, getText: (d) => d.text, getSize: 12, fontWeight: 700, characterSet: "auto", getColor: [255, 255, 255, 255], background: true, getBackgroundColor: [31, 111, 209, 235], backgroundPadding: [5, 3], getPixelOffset: [0, -22], getTextAnchor: "middle", getAlignmentBaseline: "center" }),
         // кольцо магнита: зеленое - прилипнет к узлу, синее - встанет на линию дороги новым общим узлом
-        new ScatterplotLayer({ id: "snap", data: snapMark && tool === "draw" ? [snapMark] : [], getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: "pixels", filled: false, stroked: true, getLineWidth: 2.5, lineWidthUnits: "pixels", getLineColor: (d) => (d.id !== null ? [40, 170, 90, 255] : [31, 111, 209, 255]) }),
+        new ScatterplotLayer({ id: "snap", data: snapMark ? [snapMark] : [], getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: "pixels", filled: false, stroked: true, getLineWidth: 2.5, lineWidthUnits: "pixels", getLineColor: (d) => (d.id !== null ? [40, 170, 90, 255] : [31, 111, 209, 255]) }),
     ].map((l) => l.clone({ parameters: flat }));
     overlay.setProps({
       // в 2D здания плоские и лежат под дорогами, в 3D объемные здания закрывают дороги за собой

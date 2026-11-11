@@ -258,6 +258,44 @@ export function lineHitsBuilding(points: { lat: number; lon: number }[], tags: T
   return points.some((p, i) => buildingAt(ix, p) !== null || (i > 0 && buildingsOnSegment(ix, points[i - 1], p).length > 0));
 }
 
+// Пройдет ли дорога сквозь здание, если ее узел nodeId окажется в точке to
+function nodeHitsBuilding(d: OsmData, nodeId: number, to: [number, number]): boolean {
+  const ix = buildingIndex(d);
+  return [...d.ways.values()].some((w) => {
+    const i = w.nodeIds.indexOf(nodeId);
+    if (i < 0 || !isDrivable(w) || mayCrossBuildings(w)) return false;
+    const at = { lat: to[0], lon: to[1] };
+    if (buildingAt(ix, at)) return true;
+    return [w.nodeIds[i - 1], w.nodeIds[i + 1]].some((id) => { const m = id !== undefined ? d.nodes.get(id) : undefined; return !!m && buildingsOnSegment(ix, m, at).length > 0; });
+  });
+}
+
+// Магнит при перетаскивании: узел дороги отпустили на другом узле или на линии другой дороги.
+// Узел уже стоит в точке прилипания. Перенос и соединение записываются одной правкой: Ctrl+Z вернет узел на старое место.
+export function dropNodeOn(nodeId: number, from: [number, number], target: { id: number | null; onWay?: number }) {
+  const d = ed().data!;
+  const n = d.nodes.get(nodeId);
+  if (!n) return;
+  const to: [number, number] = [n.lat, n.lon];
+  n.lat = from[0]; n.lon = from[1];
+  if (nodeHitsBuilding(d, nodeId, to)) { ed().bump(); return ed().toast(tr(THROUGH_BUILDING)); }
+  if (target.id !== null && d.nodes.has(target.id)) {
+    const keep = target.id;
+    ed().run(tr("Узел перенесен и соединен с узлом"), [...new Set([...waysWithNode(d, nodeId), ...waysWithNode(d, keep)])], [nodeId, keep], () => mergeInto(d, keep, nodeId));
+    ed().select({ kind: "node", id: keep });
+    return ed().toast(tr("Узлы соединены, дороги теперь связаны"));
+  }
+  const w = target.onWay !== undefined ? d.ways.get(target.onWay) : undefined;
+  const seg = w ? nearestSegment(d, w, to[0], to[1]) : null;
+  if (!w || !seg || seg.idx < 0) { ed().run(tr("Перенос узла"), [], [nodeId], () => { n.lat = to[0]; n.lon = to[1]; }); return; }
+  const [plat, plon] = seg.pr.toLatLon(seg.q[0], seg.q[1]);
+  ed().run(tr("Узел перенесен и соединен с дорогой"), [...new Set([...waysWithNode(d, nodeId), w.id])], [nodeId], () => {
+    n.lat = plat; n.lon = plon;
+    w.nodeIds.splice(seg.idx, 0, nodeId);
+  });
+  ed().toast(tr("Узел присоединен к дороге"));
+}
+
 export function moveNodeDone(nodeId: number, from: [number, number]) {
   // узел уже передвинут во время перетаскивания, записываем команду в историю
   const d = ed().data!;
@@ -265,15 +303,7 @@ export function moveNodeDone(nodeId: number, from: [number, number]) {
   const to: [number, number] = [n.lat, n.lon];
   n.lat = from[0]; n.lon = from[1];
   // узел дороги нельзя затащить так, чтобы дорога прошла сквозь здание: узел возвращается на место
-  const ix = buildingIndex(d);
-  const bad = [...d.ways.values()].some((w) => {
-    const i = w.nodeIds.indexOf(nodeId);
-    if (i < 0 || !isDrivable(w) || mayCrossBuildings(w)) return false;
-    const at = { lat: to[0], lon: to[1] };
-    if (buildingAt(ix, at)) return true;
-    return [w.nodeIds[i - 1], w.nodeIds[i + 1]].some((id) => { const m = id !== undefined ? d.nodes.get(id) : undefined; return !!m && buildingsOnSegment(ix, m, at).length > 0; });
-  });
-  if (bad) { ed().bump(); return ed().toast(tr(THROUGH_BUILDING)); }
+  if (nodeHitsBuilding(d, nodeId, to)) { ed().bump(); return ed().toast(tr(THROUGH_BUILDING)); }
   // угол здания: здание не должно наехать на дорогу
   n.lat = to[0]; n.lon = to[1];
   const onRoad = buildingsOf(d, [nodeId]).some((b) => roadThroughBuilding(d, b));

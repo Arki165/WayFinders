@@ -7,6 +7,7 @@ const ICONS = {
   select: <path d="M5 3.5l5.8 16.2 2.3-6.6 6.6-2.3z" />,
   draw: <><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></>,
   node: <><path d="M3 18L21 6" /><circle cx="11" cy="12.7" r="3" /><path d="M18 14v6M15 17h6" /></>,
+  magnet: <><path d="M6 4v8a6 6 0 0 0 12 0V4h-4v8a2 2 0 0 1-4 0V4z" /><path d="M6 8h4M14 8h4" /></>,
   join: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
   unjoin: <><path d="M12 6.5l1.5-1.5a3.9 3.9 0 0 1 5.5 5.5L17.5 12" /><path d="M12 17.5L10.5 19A3.9 3.9 0 0 1 5 13.5L6.5 12" /><path d="M4 4l2 2M20 20l-2-2M9 2.5V5M15 21.5V19" /></>,
   signal: <><rect x="8" y="2.5" width="8" height="19" rx="3" /><circle cx="12" cy="7" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="17" r="1.5" /></>,

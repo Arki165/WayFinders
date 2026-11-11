@@ -43,7 +43,7 @@ const HOTKEYS: [string, string][] = [
   ["V", "Выбор, перетаскивание узлов"], ["W", "Нарисовать дорогу"], ["N", "Добавить узел"], ["J", "Соединить"], ["U", "Разъединить"],
   ["T", "Светофор"], ["X", "Разрезать дорогу"], ["D", "Удалить кликом"], ["R", "Развернуть направление"], ["Del", "Удалить выделенное"],
   ["Shift Клик", "Добавить к выделению"], ["Enter", "Закончить дорогу"], ["Esc", "Отмена, снять выделение"],
-  ["3", "2D или 3D"], ["H", "Загрузка Z на карте"], ["Ctrl Z", "Отменить"], ["Ctrl Y", "Повторить"],
+  ["3", "2D или 3D"], ["H", "Загрузка Z на карте"], ["M", "Магнит: прилипание к узлам и дорогам"], ["Ctrl Z", "Отменить"], ["Ctrl Y", "Повторить"],
   ["Ctrl S", "Сохранить"], ["Ctrl O", "Открыть файл"], ["Ctrl F", "Поиск улицы"], ["?", "Этот список"],
 ];
 
@@ -211,6 +211,7 @@ export default function App() {
       if (k === "escape") { setKeysOpen(false); st.getState().select(null); st.getState().setHighlight([]); return setTool("select"); }
       if (k === "3") return setView3d((v) => !v);
       if (k === "h" || k === "р") return setHeat((v) => !v);
+      if (k === "m" || k === "ь") return setMagnet((v) => !v);
       const map: Record<string, Tool> = { v: "select", м: "select", w: "draw", ц: "draw", n: "node", т: "node", j: "join", о: "join", u: "unjoin", г: "unjoin", t: "signal", е: "signal", x: "split", ч: "split", d: "delete", в: "delete" };
       if (map[k]) setTool(map[k]);
     };
@@ -277,6 +278,10 @@ export default function App() {
               <Icon name={t.icon} size={20} /><kbd>{t.key}</kbd>
             </button>
           ))}
+          {/* магнит - не инструмент, а переключатель: работает и при рисовании, и при перетаскивании узла */}
+          <button className={"tool tool-group" + (magnet ? " on" : "")} onClick={() => setMagnet(!magnet)} title={tr("Магнит: узел или точка прилипает к ближнему узлу или линии другой дороги (M)")} disabled={!data}>
+            <Icon name="magnet" size={20} /><kbd>M</kbd>
+          </button>
         </nav>
 
         <main className="center">

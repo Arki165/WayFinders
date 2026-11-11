@@ -33,6 +33,7 @@ export const GUIDE_EN: GuideSection[] = [
     "D | Delete a road or a node by clicking",
     "R | Reverse the direction of the selected road",
     "Shift+click | Several roads or a section between two nodes",
+    "M | Snap: while drawing and while dragging, a node sticks to the nearest node or to the line of another road",
     "Ctrl+Z, Ctrl+Y | Undo and redo",
   ] },
   { title: "Drawing a road", items: [

@@ -1607,10 +1607,10 @@
   <node id="1498865640" visible="true" version="3" changeset="179303353" timestamp="2026-03-03T13:53:57Z" user="literan" uid="830106" lat="52.2641154" lon="104.2590468"/>
   <node id="1498865642" visible="true" version="4" changeset="12783156" timestamp="2012-08-19T12:49:04Z" user="darkringfire" uid="72900" lat="52.2689373" lon="104.2566729">
     <tag k="highway" v="traffic_signals"/>
-    <tag k="wayfinders:cycle" v="88"/>
+    <tag k="wayfinders:cycle" v="78"/>
     <tag k="wayfinders:green" v="60"/>
     <tag k="wayfinders:yellow" v="3"/>
-    <tag k="wayfinders:red" v="25"/>
+    <tag k="wayfinders:red" v="15"/>
   </node>
   <node id="1498865644" visible="true" version="4" changeset="12783156" timestamp="2012-08-19T12:49:04Z" user="darkringfire" uid="72900" lat="52.2690208" lon="104.2570694"/>
   <node id="1517781153" visible="true" version="3" changeset="82419669" timestamp="2020-03-20T07:21:06Z" user="User4 - Lightcyphers" uid="7753484" lat="52.2667294" lon="104.2594986"/>
@@ -5066,28 +5066,28 @@
   <node id="10250749957" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2690162" lon="104.2566315">
     <tag k="crossing" v="traffic_signals"/>
     <tag k="highway" v="crossing"/>
-    <tag k="wayfinders:cycle" v="88"/>
+    <tag k="wayfinders:cycle" v="83"/>
     <tag k="wayfinders:green" v="60"/>
     <tag k="wayfinders:yellow" v="3"/>
-    <tag k="wayfinders:red" v="25"/>
+    <tag k="wayfinders:red" v="20"/>
   </node>
   <node id="10250749958" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2690327" lon="104.2567167"/>
   <node id="10250749959" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2690585" lon="104.2568515"/>
   <node id="10250749960" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2690010" lon="104.2569754">
     <tag k="crossing" v="traffic_signals"/>
     <tag k="highway" v="crossing"/>
-    <tag k="wayfinders:cycle" v="88"/>
+    <tag k="wayfinders:cycle" v="78"/>
     <tag k="wayfinders:green" v="60"/>
     <tag k="wayfinders:yellow" v="3"/>
-    <tag k="wayfinders:red" v="25"/>
+    <tag k="wayfinders:red" v="15"/>
   </node>
   <node id="10250749961" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2689759" lon="104.2570330">
     <tag k="crossing" v="traffic_signals"/>
     <tag k="highway" v="crossing"/>
-    <tag k="wayfinders:cycle" v="88"/>
+    <tag k="wayfinders:cycle" v="83"/>
     <tag k="wayfinders:green" v="60"/>
     <tag k="wayfinders:yellow" v="3"/>
-    <tag k="wayfinders:red" v="25"/>
+    <tag k="wayfinders:red" v="20"/>
   </node>
   <node id="10250749962" visible="true" version="2" changeset="147867575" timestamp="2024-02-24T19:04:35Z" user="Pushen Mike" uid="13997304" lat="52.2689096" lon="104.2571887"/>
   <node id="10250749963" visible="true" version="1" changeset="129935329" timestamp="2022-12-10T14:26:53Z" user="Vladimir Syroezhkin" uid="3871350" lat="52.2672030" lon="104.2578716"/>

@@ -908,4 +908,8 @@ export const EN: Record<string, string> = {
   "Выберите network.net.xml из scenario.zip прошлого прогона. Программа запишет additional.add.xml: схема сигналов из сети, время фаз из редактора": "Pick network.net.xml from the previous run's scenario.zip. The program writes additional.add.xml: signal layout from the network, phase times from the editor",
   "Фазы светофоров...": "Signal phases...",
   "Время фаз из редактора для сервера проверки (поле additional.add.xml). Нужен network.net.xml из scenario.zip прошлого прогона того же графа.": "Phase times from the editor for the check server (the additional.add.xml field). Needs network.net.xml from scenario.zip of a previous run of the same graph.",
+  "Магнит: узел или точка прилипает к ближнему узлу или линии другой дороги (M)": "Snap: a node or point sticks to the nearest node or to the line of another road (M)",
+  "Магнит: прилипание к узлам и дорогам": "Snap to nodes and roads",
+  "Узел перенесен и соединен с узлом": "Node moved and joined to a node",
+  "Узел перенесен и соединен с дорогой": "Node moved and joined to a road",
 };

@@ -4,22 +4,22 @@
     <tlLogic id="10250749957" type="static" programID="wayfinder" offset="0">
         <phase duration="60" state="GGG"/>
         <phase duration="3" state="yyy"/>
-        <phase duration="25" state="rrr"/>
+        <phase duration="20" state="rrr"/>
     </tlLogic>
     <tlLogic id="10250749960" type="static" programID="wayfinder" offset="0">
         <phase duration="60" state="G"/>
         <phase duration="3" state="y"/>
-        <phase duration="25" state="r"/>
+        <phase duration="15" state="r"/>
     </tlLogic>
     <tlLogic id="10250749961" type="static" programID="wayfinder" offset="0">
         <phase duration="60" state="GG"/>
         <phase duration="3" state="yy"/>
-        <phase duration="25" state="rr"/>
+        <phase duration="20" state="rr"/>
     </tlLogic>
     <tlLogic id="1498865642" type="static" programID="wayfinder" offset="0">
         <phase duration="60" state="GGGG"/>
         <phase duration="3" state="yyyy"/>
-        <phase duration="25" state="rrrr"/>
+        <phase duration="15" state="rrrr"/>
     </tlLogic>
     <tlLogic id="1872643965" type="static" programID="wayfinder" offset="0">
         <phase duration="45" state="GGrr"/>
